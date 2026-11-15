@@ -6,8 +6,10 @@ import { LeftRail } from './leftRail/LeftRail';
 import { CenterStage } from './centerStage/CenterStage';
 import { RightRail } from './rightRail/RightRail';
 import { ExportModal } from '../export/ExportModal';
-import { WebReaderModal } from '../preview/WebReaderModal';
+import { WebReaderModal, type ReaderEngineMode } from '../preview/WebReaderModal';
+import type { ScreenRatioKey } from '../../compiler/multiFormatExporter';
 import { TemplatePickerModal } from '../templates/TemplatePickerModal';
+import { SettingsModal } from '../settings/SettingsModal';
 
 // Craft.js resolvers
 import { CanvasContainer } from '../blocks/CanvasContainer';
@@ -21,17 +23,30 @@ import { AccordionBlock } from '../blocks/AccordionBlock';
 import { HotspotPinboardBlock } from '../blocks/HotspotPinboardBlock';
 import { VisualGalleryBlock } from '../blocks/VisualGalleryBlock';
 import { AudioNarrationBlock } from '../blocks/AudioNarrationBlock';
+import { FreeformCanvasBlock } from '../blocks/FreeformCanvasBlock';
 
 export const EditorWorkspace: React.FC = () => {
-  const { loadProjectFromDb, undo, redo, saveProjectToDb } = useEditorStore();
+  const { project, viewportMode, undo, redo, saveProjectToDb, updateChapterCraftState } = useEditorStore();
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isWebReaderOpen, setIsWebReaderOpen] = useState(false);
+  const [readerInitialEngine, setReaderInitialEngine] = useState<ReaderEngineMode>('web');
+  const [readerInitialRatio, setReaderInitialRatio] = useState<ScreenRatioKey>('tablet');
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Load project on mount
+  const mapViewportToRatio = (): ScreenRatioKey => {
+    if (viewportMode === 'mobile') return 'mobile';
+    if (viewportMode === 'tablet') return 'tablet';
+    if (viewportMode === 'desktop') return 'laptop';
+    if (viewportMode === 'comic') return 'comic';
+    if (viewportMode === 'square') return 'square';
+    return 'tablet';
+  };
+
+  // Ensure active project is persisted on mount
   useEffect(() => {
-    loadProjectFromDb();
-  }, []);
+    saveProjectToDb();
+  }, [project.id]);
 
   // Global Keyboard Shortcuts
   useEffect(() => {
@@ -71,6 +86,21 @@ export const EditorWorkspace: React.FC = () => {
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-neo-bg">
       <Editor
+        key={`${project.id}:${project.activeChapterId}`}
+        onNodesChange={(query) => {
+          try {
+            const json = query.serialize();
+            const currentChapterId = useEditorStore.getState().project.activeChapterId;
+            const currentChapter = useEditorStore
+              .getState()
+              .project.chapters.find((c) => c.id === currentChapterId);
+            if (currentChapter && json && json !== '{}' && json !== currentChapter.craftStateJson) {
+              updateChapterCraftState(currentChapterId, json);
+            }
+          } catch {
+            // Ignore transient serialization states during mount
+          }
+        }}
         resolver={{
           CanvasContainer,
           TypographyBlock,
@@ -84,6 +114,7 @@ export const EditorWorkspace: React.FC = () => {
           HotspotPinboardBlock,
           VisualGalleryBlock,
           AudioNarrationBlock,
+          FreeformCanvasBlock,
         }}
         indicator={{
           success: '#FF5E3A', // Neo-vermilion drop line indicator!
@@ -93,8 +124,13 @@ export const EditorWorkspace: React.FC = () => {
       >
         <Header
           onOpenExportModal={() => setIsExportOpen(true)}
-          onOpenWebReader={() => setIsWebReaderOpen(true)}
+          onOpenWebReader={() => {
+            setReaderInitialEngine('web');
+            setReaderInitialRatio(mapViewportToRatio());
+            setIsWebReaderOpen(true);
+          }}
           onOpenTemplates={() => setIsTemplatesOpen(true)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
         />
         <div className="flex-1 flex overflow-hidden relative">
           <LeftRail />
@@ -110,11 +146,21 @@ export const EditorWorkspace: React.FC = () => {
         <ExportModal
           isOpen={isExportOpen}
           onClose={() => setIsExportOpen(false)}
-          onOpenWebReader={() => setIsWebReaderOpen(true)}
+          onOpenWebReader={(engine = 'web', ratio = 'tablet') => {
+            setReaderInitialEngine(engine);
+            setReaderInitialRatio(ratio);
+            setIsWebReaderOpen(true);
+          }}
         />
         <WebReaderModal
           isOpen={isWebReaderOpen}
           onClose={() => setIsWebReaderOpen(false)}
+          initialEngine={readerInitialEngine}
+          initialRatio={readerInitialRatio}
+        />
+        <SettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
         />
       </Editor>
     </div>

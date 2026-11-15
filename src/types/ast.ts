@@ -1,4 +1,4 @@
-export type ViewportMode = 'mobile' | 'tablet' | 'desktop';
+export type ViewportMode = 'mobile' | 'tablet' | 'desktop' | 'comic' | 'square';
 
 export interface ViewportConfig {
   mode: ViewportMode;
@@ -29,6 +29,20 @@ export const VIEWPORT_PRESETS: Record<ViewportMode, ViewportConfig> = {
     width: 1280,
     height: 800,
     icon: 'Laptop',
+  },
+  comic: {
+    mode: 'comic',
+    name: 'Comic / Graphic 2:3',
+    width: 800,
+    height: 1200,
+    icon: 'Film',
+  },
+  square: {
+    mode: 'square',
+    name: 'Square Zine 1:1',
+    width: 900,
+    height: 900,
+    icon: 'Square',
   },
 };
 
@@ -96,6 +110,19 @@ export interface Chapter {
   updatedAt: number;
 }
 
+export interface AssetAttribution {
+  id: string;
+  title: string;
+  creator: string;
+  creatorUrl?: string;
+  sourceName: string;
+  sourceUrl?: string;
+  license: string;
+  licenseUrl?: string;
+  assetUrl?: string;
+  addedAt: number;
+}
+
 export interface BookMetadata {
   title: string;
   author: string;
@@ -104,6 +131,7 @@ export interface BookMetadata {
   description?: string;
   publisher?: string;
   coverImage?: string; // base64 or blob URL
+  attributions?: AssetAttribution[];
 }
 
 export interface BookProject {

@@ -1,26 +1,98 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import type { BookProject, Chapter, BookMetadata, ViewportMode } from '../types/ast';
-import { db, createStarterProject } from '../db';
+import type { BookProject, Chapter, BookMetadata, ViewportMode, AssetAttribution } from '../types/ast';
+import {
+  db,
+  createStarterProject,
+  createBlankProject,
+  createDefaultChapterCraftJson,
+  normalizeProjectChapters,
+} from '../db';
+import { syncProjectToLocalFs, deleteProjectFromLocalFs } from '../db/localFs';
+import { notify } from './toastStore';
+
+export type WyzardThemeMode = 'light' | 'dark' | 'system';
+
+const THEME_STORAGE_KEY = 'wyzard-theme-mode';
+
+export function resolveEffectiveTheme(mode: WyzardThemeMode): 'light' | 'dark' {
+  if (mode === 'system' && typeof window !== 'undefined' && window.matchMedia) {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  return mode === 'dark' ? 'dark' : 'light';
+}
+
+export function applyThemeToDocument(mode: WyzardThemeMode): void {
+  if (typeof document === 'undefined') return;
+  const effective = resolveEffectiveTheme(mode);
+  document.documentElement.classList.toggle('dark', effective === 'dark');
+  document.documentElement.setAttribute('data-theme', effective);
+}
+
+const getInitialThemeMode = (): WyzardThemeMode => {
+  if (typeof window === 'undefined') return 'light';
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY) as WyzardThemeMode | null;
+    if (saved === 'light' || saved === 'dark' || saved === 'system') {
+      applyThemeToDocument(saved);
+      return saved;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  applyThemeToDocument('light');
+  return 'light';
+};
+
+const getInitialPanelOpenState = (): boolean => {
+  if (typeof window === 'undefined') return true;
+  return window.innerWidth >= 1024;
+};
 
 interface EditorState {
   project: BookProject;
+  themeMode: WyzardThemeMode;
+  isWorkspaceOpen: boolean;
+  isTransitioning: boolean;
+  transitionLabel: string;
+  isLeftRailOpen: boolean;
+  isRightRailOpen: boolean;
   viewportMode: ViewportMode;
   zoomLevel: number;
   selectedNodeId: string | null;
-  activeSidebarTab: 'spine' | 'blocks';
+  activeSidebarTab: 'spine' | 'blocks' | 'assets';
   activeInspectorTab: 'block' | 'page' | 'project';
   isSaving: boolean;
   lastSavedAt: number | null;
   history: string[]; // snapshot serialized project states for Undo
   historyPointer: number;
 
-  // Actions
+  // Theme & Appearance Actions
+  setThemeMode: (mode: WyzardThemeMode) => void;
+  toggleThemeMode: () => void;
+
+  // Panel Visibility Actions
+  toggleLeftRail: () => void;
+  setLeftRailOpen: (open: boolean) => void;
+  toggleRightRail: () => void;
+  setRightRailOpen: (open: boolean) => void;
+
+  // Workspace & Project Actions
+  openWorkspace: () => Promise<void>;
+  openProject: (id: string) => Promise<void>;
+  createNewProject: (customProject?: BookProject) => Promise<void>;
+  duplicateProject: (id: string) => Promise<void>;
+  deleteProjectFromDb: (id: string) => Promise<void>;
+  renameProjectInDb: (id: string, newTitle: string) => Promise<void>;
+
+  // Editor Actions
   setViewportMode: (mode: ViewportMode) => void;
   setZoomLevel: (zoom: number) => void;
   setSelectedNodeId: (nodeId: string | null) => void;
-  setActiveSidebarTab: (tab: 'spine' | 'blocks') => void;
+  setActiveSidebarTab: (tab: 'spine' | 'blocks' | 'assets') => void;
   setActiveInspectorTab: (tab: 'block' | 'page' | 'project') => void;
+  addAssetAttribution: (attr: Omit<AssetAttribution, 'id' | 'addedAt'>) => void;
+  removeAssetAttribution: (id: string) => void;
   setActiveChapter: (chapterId: string) => void;
   addChapter: (title?: string) => void;
   deleteChapter: (chapterId: string) => void;
@@ -38,6 +110,12 @@ interface EditorState {
 export const useEditorStore = create<EditorState>()(
   immer((set, get) => ({
     project: createStarterProject(),
+    themeMode: getInitialThemeMode(),
+    isWorkspaceOpen: true,
+    isTransitioning: false,
+    transitionLabel: '',
+    isLeftRailOpen: getInitialPanelOpenState(),
+    isRightRailOpen: getInitialPanelOpenState(),
     viewportMode: 'mobile',
     zoomLevel: 100,
     selectedNodeId: null,
@@ -47,6 +125,301 @@ export const useEditorStore = create<EditorState>()(
     lastSavedAt: null,
     history: [],
     historyPointer: -1,
+
+    setThemeMode: (mode) => {
+      set((state) => {
+        state.themeMode = mode;
+      });
+      try {
+        localStorage.setItem(THEME_STORAGE_KEY, mode);
+      } catch {
+        // ignore
+      }
+      applyThemeToDocument(mode);
+      notify({
+        type: 'info',
+        title: `Theme: ${
+          mode === 'dark'
+            ? 'Dark Studio (Midnight Obsidian)'
+            : mode === 'light'
+            ? 'Light Studio (Warm Newsprint)'
+            : 'System Appearance'
+        }`,
+        duration: 1800,
+      });
+    },
+
+    toggleThemeMode: () => {
+      const current = resolveEffectiveTheme(get().themeMode);
+      const next: WyzardThemeMode = current === 'dark' ? 'light' : 'dark';
+      get().setThemeMode(next);
+    },
+
+    toggleLeftRail: () => {
+      set((state) => {
+        const next = !state.isLeftRailOpen;
+        state.isLeftRailOpen = next;
+        // On small mobile screens (<768px), auto-close the opposite rail so they don't overlap
+        if (next && typeof window !== 'undefined' && window.innerWidth < 768) {
+          state.isRightRailOpen = false;
+        }
+      });
+    },
+
+    setLeftRailOpen: (open) => {
+      set((state) => {
+        state.isLeftRailOpen = open;
+        if (open && typeof window !== 'undefined' && window.innerWidth < 768) {
+          state.isRightRailOpen = false;
+        }
+      });
+    },
+
+    toggleRightRail: () => {
+      set((state) => {
+        const next = !state.isRightRailOpen;
+        state.isRightRailOpen = next;
+        if (next && typeof window !== 'undefined' && window.innerWidth < 768) {
+          state.isLeftRailOpen = false;
+        }
+      });
+    },
+
+    setRightRailOpen: (open) => {
+      set((state) => {
+        state.isRightRailOpen = open;
+        if (open && typeof window !== 'undefined' && window.innerWidth < 768) {
+          state.isLeftRailOpen = false;
+        }
+      });
+    },
+
+    openWorkspace: async () => {
+      set((state) => {
+        state.isTransitioning = true;
+        state.transitionLabel = 'Saving & returning to Workspace...';
+      });
+      await get().saveProjectToDb();
+      setTimeout(() => {
+        set((state) => {
+          state.isWorkspaceOpen = true;
+          state.selectedNodeId = null;
+          state.isTransitioning = false;
+          state.transitionLabel = '';
+        });
+      }, 160);
+    },
+
+    openProject: async (id) => {
+      set((state) => {
+        state.isTransitioning = true;
+        state.transitionLabel = 'Loading project layout...';
+      });
+      try {
+        const loaded = await db.projects.get(id);
+        if (!loaded) {
+          set((state) => {
+            state.isTransitioning = false;
+          });
+          notify({
+            type: 'error',
+            title: 'Project Not Found',
+            message: 'The requested layout could not be found in local storage.',
+          });
+          return;
+        }
+        const normalized = normalizeProjectChapters(loaded);
+        await db.projects.put(normalized);
+        setTimeout(() => {
+          set((state) => {
+            state.project = normalized;
+            state.lastSavedAt = normalized.updatedAt;
+            state.selectedNodeId = null;
+            state.history = [JSON.stringify(normalized)];
+            state.historyPointer = 0;
+            state.isWorkspaceOpen = false;
+            state.isTransitioning = false;
+            state.transitionLabel = '';
+          });
+          notify({
+            type: 'success',
+            title: `Opened "${normalized.title}"`,
+            message: `${normalized.chapters.length} spine ${
+              normalized.chapters.length === 1 ? 'chapter' : 'chapters'
+            } loaded.`,
+            duration: 2400,
+          });
+        }, 180);
+      } catch (err) {
+        console.error('Failed to open project:', err);
+        set((state) => {
+          state.isTransitioning = false;
+        });
+        notify({
+          type: 'error',
+          title: 'Failed to Open Project',
+          message: 'An unexpected database error occurred while loading the project.',
+        });
+      }
+    },
+
+    createNewProject: async (customProject) => {
+      set((state) => {
+        state.isTransitioning = true;
+        state.transitionLabel = 'Initializing new publication studio...';
+      });
+      try {
+        const now = Date.now();
+        const newProject: BookProject = customProject
+          ? {
+              ...JSON.parse(JSON.stringify(customProject)),
+              id: 'proj-' + now + '-' + Math.random().toString(36).slice(2, 6),
+              createdAt: now,
+              updatedAt: now,
+            }
+          : createBlankProject();
+
+        await db.projects.put(newProject);
+        syncProjectToLocalFs(newProject);
+        setTimeout(() => {
+          set((state) => {
+            state.project = newProject;
+            state.lastSavedAt = newProject.updatedAt;
+            state.selectedNodeId = null;
+            state.history = [JSON.stringify(newProject)];
+            state.historyPointer = 0;
+            state.isWorkspaceOpen = false;
+            state.isTransitioning = false;
+            state.transitionLabel = '';
+          });
+          notify({
+            type: 'success',
+            title: 'Layout Project Created',
+            message: `"${newProject.title}" is ready for editing.`,
+          });
+        }, 180);
+      } catch (err) {
+        console.error('Failed to create project:', err);
+        set((state) => {
+          state.isTransitioning = false;
+        });
+        notify({
+          type: 'error',
+          title: 'Creation Error',
+          message: 'Could not initialize the new layout project.',
+        });
+      }
+    },
+
+    duplicateProject: async (id) => {
+      try {
+        const source = await db.projects.get(id);
+        if (!source) {
+          notify({
+            type: 'error',
+            title: 'Duplicate Failed',
+            message: 'Source layout project could not be found.',
+          });
+          return;
+        }
+        const now = Date.now();
+        const copyTitle = `${source.title} (Copy)`;
+        const duplicated: BookProject = {
+          ...JSON.parse(JSON.stringify(source)),
+          id: 'proj-' + now + '-' + Math.random().toString(36).slice(2, 6),
+          title: copyTitle,
+          metadata: {
+            ...source.metadata,
+            title: copyTitle,
+          },
+          createdAt: now,
+          updatedAt: now,
+        };
+        await db.projects.put(duplicated);
+        syncProjectToLocalFs(duplicated);
+        notify({
+          type: 'success',
+          title: 'Layout Duplicated',
+          message: `Created "${copyTitle}".`,
+        });
+      } catch (err) {
+        console.error('Failed to duplicate project:', err);
+        notify({
+          type: 'error',
+          title: 'Duplicate Failed',
+          message: 'An error occurred while duplicating the project.',
+        });
+      }
+    },
+
+    deleteProjectFromDb: async (id) => {
+      try {
+        const target = await db.projects.get(id);
+        await db.projects.delete(id);
+        await db.assets.where('projectId').equals(id).delete();
+        deleteProjectFromLocalFs(id);
+        notify({
+          type: 'info',
+          title: 'Layout Deleted',
+          message: target ? `Removed "${target.title}" from workspace.` : 'Project removed.',
+        });
+      } catch (err) {
+        console.error('Failed to delete project:', err);
+        notify({
+          type: 'error',
+          title: 'Delete Error',
+          message: 'Could not delete the layout project.',
+        });
+      }
+    },
+
+    renameProjectInDb: async (id, newTitle) => {
+      const trimmed = newTitle.trim();
+      if (!trimmed) {
+        notify({
+          type: 'warning',
+          title: 'Validation Error',
+          message: 'Project title cannot be empty.',
+        });
+        return;
+      }
+      try {
+        const existing = await db.projects.get(id);
+        if (existing) {
+          const updated: BookProject = {
+            ...existing,
+            title: trimmed,
+            metadata: {
+              ...existing.metadata,
+              title: trimmed,
+            },
+            updatedAt: Date.now(),
+          };
+          await db.projects.put(updated);
+          syncProjectToLocalFs(updated);
+        }
+        if (get().project.id === id) {
+          set((state) => {
+            state.project.title = trimmed;
+            state.project.metadata.title = trimmed;
+            state.project.updatedAt = Date.now();
+          });
+        }
+        notify({
+          type: 'success',
+          title: 'Title Updated',
+          message: `Renamed to "${trimmed}".`,
+          duration: 2200,
+        });
+      } catch (err) {
+        console.error('Failed to rename project:', err);
+        notify({
+          type: 'error',
+          title: 'Rename Failed',
+          message: 'Could not save the updated project title.',
+        });
+      }
+    },
 
     setViewportMode: (mode) => {
       set((state) => {
@@ -82,22 +455,35 @@ export const useEditorStore = create<EditorState>()(
     },
 
     setActiveChapter: (chapterId) => {
+      const target = get().project.chapters.find((c) => c.id === chapterId);
       set((state) => {
         state.project.activeChapterId = chapterId;
         state.selectedNodeId = null;
       });
+      get().saveProjectToDb();
+      if (target) {
+        notify({
+          type: 'info',
+          title: 'Switched Spine Chapter',
+          message: `Loaded "${target.title}".`,
+          duration: 1800,
+        });
+      }
     },
 
     addChapter: (title) => {
       get().pushHistorySnapshot();
+      let createdTitle = '';
       set((state) => {
         const order = state.project.chapters.length + 1;
+        const chapterTitle = (title || '').trim() || `Chapter ${order}: Untitled`;
+        createdTitle = chapterTitle;
         const newChapter: Chapter = {
           id: 'ch-' + Date.now(),
-          title: title || `Chapter ${order}: Untitled`,
+          title: chapterTitle,
           slug: `chapter-${order}`,
           order,
-          craftStateJson: '',
+          craftStateJson: createDefaultChapterCraftJson(chapterTitle),
           backgroundColor: '#FFFFFF',
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -107,14 +493,24 @@ export const useEditorStore = create<EditorState>()(
         state.project.updatedAt = Date.now();
       });
       get().saveProjectToDb();
+      notify({
+        type: 'success',
+        title: 'Chapter Added to Spine',
+        message: `Created "${createdTitle}".`,
+      });
     },
 
     deleteChapter: (chapterId) => {
       const { project } = get();
       if (project.chapters.length <= 1) {
-        alert("A book must have at least one chapter.");
+        notify({
+          type: 'warning',
+          title: 'Cannot Delete Last Chapter',
+          message: 'A publication must contain at least one chapter in the spine.',
+        });
         return;
       }
+      const target = project.chapters.find((c) => c.id === chapterId);
       get().pushHistorySnapshot();
       set((state) => {
         state.project.chapters = state.project.chapters.filter((c) => c.id !== chapterId);
@@ -124,13 +520,27 @@ export const useEditorStore = create<EditorState>()(
         state.project.updatedAt = Date.now();
       });
       get().saveProjectToDb();
+      notify({
+        type: 'info',
+        title: 'Chapter Removed',
+        message: target ? `Deleted "${target.title}".` : 'Chapter removed from spine.',
+      });
     },
 
     renameChapter: (chapterId, newTitle) => {
+      const trimmed = newTitle.trim();
+      if (!trimmed) {
+        notify({
+          type: 'warning',
+          title: 'Validation Error',
+          message: 'Chapter title cannot be blank.',
+        });
+        return;
+      }
       set((state) => {
         const ch = state.project.chapters.find((c) => c.id === chapterId);
         if (ch) {
-          ch.title = newTitle;
+          ch.title = trimmed;
           ch.updatedAt = Date.now();
           state.project.updatedAt = Date.now();
         }
@@ -175,13 +585,61 @@ export const useEditorStore = create<EditorState>()(
       get().saveProjectToDb();
     },
 
+    addAssetAttribution: (attr) => {
+      let wasAdded = false;
+      set((state) => {
+        const list = state.project.metadata.attributions || [];
+        const exists = list.some(
+          (item) =>
+            (attr.assetUrl && item.assetUrl === attr.assetUrl) ||
+            (attr.sourceUrl && item.sourceUrl === attr.sourceUrl && item.title === attr.title) ||
+            (item.title === attr.title && item.creator === attr.creator)
+        );
+        if (!exists) {
+          list.push({
+            ...attr,
+            id: 'attr-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+            addedAt: Date.now(),
+          });
+          state.project.metadata.attributions = list;
+          state.project.updatedAt = Date.now();
+          wasAdded = true;
+        }
+      });
+      get().saveProjectToDb();
+      if (wasAdded) {
+        notify({
+          type: 'success',
+          title: 'Contributor Credit Recorded',
+          message: `"${attr.title}" by ${attr.creator} added to colophon.`,
+          duration: 2400,
+        });
+      }
+    },
+
+    removeAssetAttribution: (id) => {
+      set((state) => {
+        const list = state.project.metadata.attributions || [];
+        state.project.metadata.attributions = list.filter((item) => item.id !== id);
+        state.project.updatedAt = Date.now();
+      });
+      get().saveProjectToDb();
+      notify({
+        type: 'info',
+        title: 'Credit Entry Removed',
+        duration: 2000,
+      });
+    },
+
     saveProjectToDb: async () => {
       const { project } = get();
       set((state) => {
         state.isSaving = true;
       });
       try {
-        await db.projects.put(JSON.parse(JSON.stringify(project)));
+        const plainProject = JSON.parse(JSON.stringify(project));
+        await db.projects.put(plainProject);
+        syncProjectToLocalFs(plainProject);
         set((state) => {
           state.isSaving = false;
           state.lastSavedAt = Date.now();
@@ -204,12 +662,13 @@ export const useEditorStore = create<EditorState>()(
         }
 
         if (loadedProject) {
+          const normalized = normalizeProjectChapters(loadedProject);
+          await db.projects.put(normalized);
           set((state) => {
-            state.project = loadedProject!;
-            state.lastSavedAt = loadedProject!.updatedAt;
+            state.project = normalized;
+            state.lastSavedAt = normalized.updatedAt;
           });
         } else {
-          // Initialize starter project into DB
           const starter = createStarterProject();
           await db.projects.put(starter);
           set((state) => {
@@ -227,7 +686,6 @@ export const useEditorStore = create<EditorState>()(
         const snapshot = JSON.stringify(state.project);
         const newHistory = state.history.slice(0, state.historyPointer + 1);
         newHistory.push(snapshot);
-        // limit history to 30 snapshots
         if (newHistory.length > 30) {
           newHistory.shift();
         }
@@ -244,6 +702,11 @@ export const useEditorStore = create<EditorState>()(
           state.project = JSON.parse(previousSnapshot);
           state.historyPointer = historyPointer - 1;
         });
+        notify({
+          type: 'info',
+          title: 'Undo Applied',
+          duration: 1400,
+        });
       }
     },
 
@@ -254,6 +717,11 @@ export const useEditorStore = create<EditorState>()(
         set((state) => {
           state.project = JSON.parse(nextSnapshot);
           state.historyPointer = historyPointer + 1;
+        });
+        notify({
+          type: 'info',
+          title: 'Redo Applied',
+          duration: 1400,
         });
       }
     },

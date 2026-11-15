@@ -84,13 +84,25 @@ function renderEpubNode(node: ParsedBlockNode): string {
 
     case 'SplitContainer':
     case 'AdaptiveSplitContainer': {
-      const leftCol = node.children[0] ? node.children[0].children.map(renderEpubNode).join('\n') : '';
-      const rightCol = node.children[1] ? node.children[1].children.map(renderEpubNode).join('\n') : '';
+      const ratio: string = p.desktopRatio || '60/40';
+      const cellCount =
+        ratio === '25/25/25/25' || ratio === 'bento-2x2'
+          ? 4
+          : ['33/33/33', '50/25/25', '25/50/25', '25/25/50'].includes(ratio)
+          ? 3
+          : 2;
+
+      const colsXhtml = node.children
+        .slice(0, cellCount)
+        .map(
+          (colNode) =>
+            `<div class="epub-column">${colNode.children.map(renderEpubNode).join('\n')}</div>`
+        )
+        .join('\n          ');
 
       return `
         <div class="epub-split-spread">
-          <div class="epub-column">${leftCol}</div>
-          <div class="epub-column">${rightCol}</div>
+          ${colsXhtml}
         </div>
       `;
     }
@@ -183,6 +195,95 @@ function renderEpubNode(node: ParsedBlockNode): string {
           <p><strong>🎧 ${title}</strong> (${narrator})</p>
           ${src ? `<audio controls="controls" src="${src}"><p>Audio playback is supported in EPUB 3 compatible readers.</p></audio>` : '<p><em>(Audio media available online)</em></p>'}
         </div>
+      `;
+    }
+
+    case 'FreeformCanvasBlock':
+    case 'FreeformCanvas': {
+      const ratio = p.aspectRatio || '16/9';
+      const bg = escapeXml(p.backgroundColor || '#F4F1EA');
+      const caption = escapeXml(p.caption || '');
+      const layers: any[] = p.layers || [];
+
+      const viewH =
+        ratio === '1/1'
+          ? 1000
+          : ratio === '4/5'
+          ? 1250
+          : ratio === '4/3'
+          ? 750
+          : 562;
+
+      const svgNodes = layers
+        .filter((layer) => !layer.hidden)
+        .map((layer) => {
+          const x = Math.round(((layer.x || 0) / 100) * 1000);
+          const y = Math.round(((layer.y || 0) / 100) * viewH);
+          const w = Math.round(((layer.width || 20) / 100) * 1000);
+          const h = Math.round(((layer.height || 20) / 100) * viewH);
+          const cx = Math.round(x + w / 2);
+          const cy = Math.round(y + h / 2);
+          const rot = layer.rotation || 0;
+          const transformAttr = rot ? ` transform="rotate(${rot} ${cx} ${cy})"` : '';
+
+          if (layer.type === 'path' && Array.isArray(layer.points) && layer.points.length > 0) {
+            const pts = layer.points
+              .map(
+                (pt: any, i: number) =>
+                  `${i === 0 ? 'M' : 'L'} ${Math.round(x + (pt.x / 100) * w)} ${Math.round(
+                    y + (pt.y / 100) * h
+                  )}`
+              )
+              .join(' ');
+            const d = layer.closed ? `${pts} Z` : pts;
+            const fill =
+              layer.closed && layer.fill && layer.fill !== 'transparent'
+                ? escapeXml(layer.fill)
+                : 'none';
+            return `<path d="${d}" fill="${fill}" stroke="${escapeXml(
+              layer.strokeColor || '#141414'
+            )}" stroke-width="${(layer.strokeWidth || 3) * 2}" stroke-linecap="round" stroke-linejoin="round"${transformAttr} />`;
+          }
+
+          if (layer.type === 'image' && layer.imageSrc) {
+            return `<image href="${escapeXml(layer.imageSrc)}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="xMidYMid meet"${transformAttr} />`;
+          }
+
+          const fill =
+            layer.fill && layer.fill !== 'transparent'
+              ? escapeXml(layer.fill)
+              : 'none';
+          const stroke = layer.borderNeo ? ' stroke="#141414" stroke-width="4"' : '';
+          const rx =
+            layer.shapeKind === 'circle' || layer.shapeKind === 'pill'
+              ? Math.round(Math.min(w, h) / 2)
+              : 12;
+
+          const shapeEl =
+            fill !== 'none' || layer.borderNeo
+              ? `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="${fill}"${stroke} />`
+              : '';
+
+          const textEl = layer.text
+            ? `<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" fill="${escapeXml(
+                layer.color || '#141414'
+              )}" font-family="sans-serif" font-weight="bold" font-size="${Math.round(
+                (layer.fontSize || 16) * 1.6
+              )}">${escapeXml(layer.text)}</text>`
+            : '';
+
+          return `<g${transformAttr}>${shapeEl}${textEl}</g>`;
+        })
+        .join('\n            ');
+
+      return `
+        <figure class="epub-figure page-break-avoid">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 ${viewH}" width="100%">
+            <rect x="0" y="0" width="1000" height="${viewH}" fill="${bg}" stroke="#141414" stroke-width="6" rx="16" />
+            ${svgNodes}
+          </svg>
+          ${caption ? `<figcaption class="epub-caption">${caption}</figcaption>` : ''}
+        </figure>
       `;
     }
 
@@ -404,6 +505,43 @@ export async function exportToEpub(project: BookProject): Promise<void> {
     });
   });
 
+  // Optional Colophon / Credits chapter if attributions exist
+  const attributions = project.metadata.attributions || [];
+  if (attributions.length > 0) {
+    const creditsFilename = 'colophon-credits.xhtml';
+    const creditsXhtml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${project.metadata.language || 'en'}">
+<head>
+  <meta charset="utf-8" />
+  <title>Credits &amp; Visual Attributions</title>
+  <link rel="stylesheet" type="text/css" href="../css/style.css" />
+</head>
+<body class="epub-body-doc">
+  <section epub:type="colophon" role="doc-colophon">
+    <h1 class="chapter-heading">Credits &amp; Visual Attributions</h1>
+    <p class="epub-body">This publication incorporates openly licensed works and design resources by the following contributors:</p>
+    <ul>
+      ${attributions
+        .map(
+          (attr) =>
+            `<li><strong>${escapeXml(attr.title)}</strong> by ${escapeXml(attr.creator)} (${escapeXml(attr.license)}) — Source: ${escapeXml(attr.sourceName)}${
+              attr.sourceUrl ? ` (${escapeXml(attr.sourceUrl)})` : ''
+            }</li>`
+        )
+        .join('\n      ')}
+    </ul>
+  </section>
+</body>
+</html>`;
+    zip.file(`OEBPS/chapters/${creditsFilename}`, creditsXhtml);
+    chapterEntries.push({
+      id: 'colophon-credits',
+      filename: creditsFilename,
+      title: 'Credits & Visual Attributions',
+    });
+  }
+
   // 5. OEBPS/nav.xhtml (EPUB 3 Navigation Document)
   const navXhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
@@ -443,6 +581,12 @@ export async function exportToEpub(project: BookProject): Promise<void> {
     <dc:creator id="creator">${escapeXml(project.metadata.author || 'Author')}</dc:creator>
     <meta property="dcterms:modified">${nowIso}</meta>
     ${project.metadata.description ? `<dc:description>${escapeXml(project.metadata.description)}</dc:description>` : ''}
+    ${attributions
+      .map(
+        (attr, i) =>
+          `<dc:contributor id="contrib-${i + 1}">${escapeXml(attr.creator)} (${escapeXml(attr.license)})</dc:contributor>`
+      )
+      .join('\n    ')}
   </metadata>
   <manifest>
     <item id="style" href="css/style.css" media-type="text/css"/>

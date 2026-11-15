@@ -10,6 +10,7 @@ import { AccordionBlock } from '../../blocks/AccordionBlock';
 import { HotspotPinboardBlock } from '../../blocks/HotspotPinboardBlock';
 import { VisualGalleryBlock } from '../../blocks/VisualGalleryBlock';
 import { AudioNarrationBlock } from '../../blocks/AudioNarrationBlock';
+import { FreeformCanvasBlock } from '../../blocks/FreeformCanvasBlock';
 import {
   Type,
   Image as ImageIcon,
@@ -23,6 +24,7 @@ import {
   MapPin,
   GalleryHorizontal,
   Volume2,
+  Palette,
 } from 'lucide-react';
 
 export const BlockPalette: React.FC = () => {
@@ -169,7 +171,7 @@ export const BlockPalette: React.FC = () => {
               </div>
             </div>
 
-            {/* Adaptive 2-Column Split */}
+            {/* Adaptive Multi-Column / Grid */}
             <div
               ref={(ref) => {
                 if (ref) {
@@ -185,8 +187,26 @@ export const BlockPalette: React.FC = () => {
                 <Columns className="w-5 h-5 text-neo-violet" strokeWidth={2.5} />
               </div>
               <div className="flex flex-col">
-                <span className="font-heading font-bold text-xs text-neo-ink">Adaptive Split (2-Col)</span>
-                <span className="text-[10px] font-mono text-gray-500">Mobile stack &rarr; Laptop 60/40</span>
+                <span className="font-heading font-bold text-xs text-neo-ink">Adaptive Column / Grid</span>
+                <span className="text-[10px] font-mono text-gray-500">2-Col, 3-Col, 4-Col &amp; Bento Grid</span>
+              </div>
+            </div>
+
+            {/* Freeform Visual Canvas Block (Canva / Illustrator Mode) */}
+            <div
+              ref={(ref) => {
+                if (ref) {
+                  connectors.create(ref, <FreeformCanvasBlock />);
+                }
+              }}
+              className="group flex items-center gap-3 p-3 bg-neo-yellow/20 border-neo border-neo-ink rounded-lg shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] active:translate-x-[1px] active:translate-y-[1px] cursor-grab active:cursor-grabbing transition-all"
+            >
+              <div className="p-2 bg-neo-ink text-neo-yellow rounded border border-neo-ink">
+                <Palette className="w-5 h-5" strokeWidth={2.5} />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-heading font-bold text-xs text-neo-ink">Fixed Visual Canvas</span>
+                <span className="text-[10px] font-mono text-gray-600">Canva-style 2D freeform artboard</span>
               </div>
             </div>
 

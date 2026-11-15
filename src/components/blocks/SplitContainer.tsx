@@ -1,10 +1,24 @@
 import React from 'react';
 import { useNode, Element, type UserComponent } from '@craftjs/core';
 import { useEditorStore } from '../../store/editorStore';
-import { Columns, Bookmark, ArrowUpDown } from 'lucide-react';
+import { Columns, Grid, Bookmark, ArrowUpDown } from 'lucide-react';
+
+export type SplitDesktopLayout =
+  | '50/50'
+  | '60/40'
+  | '40/60'
+  | '70/30'
+  | '30/70'
+  | '33/33/33'
+  | '50/25/25'
+  | '25/50/25'
+  | '25/25/50'
+  | '25/25/25/25'
+  | 'bento-2x2';
 
 export interface SplitContainerProps {
-  desktopRatio?: '50/50' | '60/40' | '40/60' | '70/30' | '30/70';
+  desktopRatio?: SplitDesktopLayout;
+  tabletColumns?: '1' | '2' | 'auto';
   gap?: 'none' | 'sm' | 'md' | 'lg';
   alignItems?: 'start' | 'center' | 'end' | 'stretch';
   showDivider?: boolean;
@@ -12,10 +26,10 @@ export interface SplitContainerProps {
   keepTogetherOnPageTurn?: boolean;
 }
 
-export const SplitColumn: UserComponent<{ children?: React.ReactNode; backgroundColor?: string }> = ({
-  children,
-  backgroundColor = 'transparent',
-}) => {
+export const SplitColumn: UserComponent<{
+  children?: React.ReactNode;
+  backgroundColor?: string;
+}> = ({ children, backgroundColor = 'transparent' }) => {
   const {
     connectors: { connect },
   } = useNode();
@@ -34,7 +48,7 @@ export const SplitColumn: UserComponent<{ children?: React.ReactNode; background
 };
 
 SplitColumn.craft = {
-  displayName: 'Split Column',
+  displayName: 'Grid / Split Cell',
   props: {
     backgroundColor: 'transparent',
   },
@@ -43,8 +57,24 @@ SplitColumn.craft = {
   },
 };
 
+export function getActiveCellCount(ratio: SplitDesktopLayout = '60/40'): 2 | 3 | 4 {
+  switch (ratio) {
+    case '33/33/33':
+    case '50/25/25':
+    case '25/50/25':
+    case '25/25/50':
+      return 3;
+    case '25/25/25/25':
+    case 'bento-2x2':
+      return 4;
+    default:
+      return 2;
+  }
+}
+
 export const SplitContainer: UserComponent<SplitContainerProps> = ({
   desktopRatio = '60/40',
+  tabletColumns = 'auto',
   gap = 'md',
   alignItems = 'stretch',
   showDivider = false,
@@ -61,6 +91,7 @@ export const SplitContainer: UserComponent<SplitContainerProps> = ({
   }));
 
   const viewportMode = useEditorStore((state) => state.viewportMode);
+  const cellCount = getActiveCellCount(desktopRatio);
 
   const getGapClass = () => {
     switch (gap) {
@@ -90,13 +121,17 @@ export const SplitContainer: UserComponent<SplitContainerProps> = ({
     }
   };
 
-  // If mobile viewport: Always stack vertically!
-  // If tablet or desktop: Apply split ratio side-by-side!
-  const isStacked = viewportMode === 'mobile';
+  const isMobile = viewportMode === 'mobile';
+  const isTablet = viewportMode === 'tablet';
 
   const getRatioGridClass = () => {
-    if (isStacked) {
+    if (isMobile) {
       return reverseOnMobile ? 'flex flex-col-reverse' : 'flex flex-col';
+    }
+
+    if (isTablet) {
+      if (tabletColumns === '1') return 'flex flex-col';
+      if (tabletColumns === '2') return 'grid grid-cols-2';
     }
 
     switch (desktopRatio) {
@@ -108,10 +143,29 @@ export const SplitContainer: UserComponent<SplitContainerProps> = ({
         return 'grid grid-cols-[7fr_3fr]';
       case '30/70':
         return 'grid grid-cols-[3fr_7fr]';
+      case '33/33/33':
+        return 'grid grid-cols-3';
+      case '50/25/25':
+        return 'grid grid-cols-[2fr_1fr_1fr]';
+      case '25/50/25':
+        return 'grid grid-cols-[1fr_2fr_1fr]';
+      case '25/25/50':
+        return 'grid grid-cols-[1fr_1fr_2fr]';
+      case '25/25/25/25':
+        return isTablet ? 'grid grid-cols-2' : 'grid grid-cols-4';
+      case 'bento-2x2':
+        return 'grid grid-cols-2';
       case '50/50':
       default:
         return 'grid grid-cols-2';
     }
+  };
+
+  const getLayoutLabel = () => {
+    if (desktopRatio === 'bento-2x2') return 'Adaptive 2×2 Bento Grid';
+    if (cellCount === 4) return 'Adaptive 4-Column Grid';
+    if (cellCount === 3) return 'Adaptive 3-Column Spread';
+    return 'Adaptive Split (2-Column)';
   };
 
   return (
@@ -120,7 +174,11 @@ export const SplitContainer: UserComponent<SplitContainerProps> = ({
         if (ref) connect(drag(ref));
       }}
       className={`relative group my-4 p-2 rounded-lg transition-all ${
-        selected ? 'ring-2 ring-neo-yellow ring-offset-2' : hovered ? 'outline outline-1 outline-dashed outline-neo-vermilion' : ''
+        selected
+          ? 'ring-2 ring-neo-yellow ring-offset-2'
+          : hovered
+          ? 'outline outline-1 outline-dashed outline-neo-vermilion'
+          : ''
       }`}
       style={{
         pageBreakInside: keepTogetherOnPageTurn ? 'avoid' : 'auto',
@@ -130,8 +188,12 @@ export const SplitContainer: UserComponent<SplitContainerProps> = ({
       {/* Breakpoint tag indicator */}
       <div className="flex items-center justify-between mb-2">
         <span className="text-[10px] font-mono uppercase tracking-wider text-gray-500 font-semibold flex items-center gap-1">
-          <Columns className="w-3 h-3 text-neo-violet" />
-          Adaptive Split (2-Column)
+          {cellCount > 2 ? (
+            <Grid className="w-3 h-3 text-neo-violet" />
+          ) : (
+            <Columns className="w-3 h-3 text-neo-violet" />
+          )}
+          {getLayoutLabel()}
         </span>
 
         <div className="flex items-center gap-1.5">
@@ -141,9 +203,9 @@ export const SplitContainer: UserComponent<SplitContainerProps> = ({
               Keep on Page
             </span>
           )}
-          {viewportMode !== 'mobile' ? (
+          {!isMobile ? (
             <span className="text-[10px] font-mono bg-neo-violet text-white px-2 py-0.5 rounded shadow-neo-sm font-bold">
-              Desktop Spread: {desktopRatio}
+              Spread: {desktopRatio}
             </span>
           ) : (
             <span className="text-[10px] font-mono bg-neo-bg text-neo-ink px-2 py-0.5 rounded border border-neo-ink font-semibold">
@@ -155,11 +217,23 @@ export const SplitContainer: UserComponent<SplitContainerProps> = ({
 
       <div
         className={`w-full ${getRatioGridClass()} ${getGapClass()} ${getAlignClass()} ${
-          showDivider && !isStacked ? 'divide-x-2 divide-neo-ink/20' : ''
+          showDivider && !isMobile && desktopRatio !== 'bento-2x2'
+            ? 'divide-x-2 divide-neo-ink/20'
+            : ''
         } transition-all duration-300`}
       >
-        <Element is={SplitColumn} id="left-column" canvas />
-        <Element is={SplitColumn} id="right-column" canvas />
+        <div className="flex flex-col min-w-0">
+          <Element is={SplitColumn} id="left-column" canvas />
+        </div>
+        <div className="flex flex-col min-w-0">
+          <Element is={SplitColumn} id="right-column" canvas />
+        </div>
+        <div className={cellCount >= 3 ? 'flex flex-col min-w-0' : 'hidden'}>
+          <Element is={SplitColumn} id="col-3" canvas />
+        </div>
+        <div className={cellCount >= 4 ? 'flex flex-col min-w-0' : 'hidden'}>
+          <Element is={SplitColumn} id="col-4" canvas />
+        </div>
       </div>
     </div>
   );
@@ -173,33 +247,40 @@ export const SplitContainerSettings: React.FC = () => {
     props: node.data.props as SplitContainerProps,
   }));
 
-  const viewportMode = useEditorStore((state) => state.viewportMode);
+  const twoColPresets: SplitDesktopLayout[] = ['50/50', '60/40', '40/60', '70/30', '30/70'];
+  const threeColPresets: SplitDesktopLayout[] = ['33/33/33', '50/25/25', '25/50/25', '25/25/50'];
+  const fourColPresets: { id: SplitDesktopLayout; label: string }[] = [
+    { id: '25/25/25/25', label: '4-Col Row' },
+    { id: 'bento-2x2', label: '2×2 Bento Grid' },
+  ];
 
   return (
     <div className="flex flex-col gap-4 text-xs font-sans">
       <div className="p-3 bg-neo-violet/10 border-neo border-neo-violet rounded-lg">
         <div className="font-heading font-bold text-neo-violet uppercase tracking-wider text-[11px] mb-1 flex items-center gap-1">
-          <Columns className="w-3.5 h-3.5" />
-          Dual-Target Reflow Rule
+          <Grid className="w-3.5 h-3.5" />
+          Adaptive Multi-Column &amp; Grid
         </div>
         <p className="text-[11px] text-gray-700 leading-normal">
-          On <strong>Mobile (390px)</strong>, this container always collapses into a clean vertical single-column reading stack. On <strong>Tablet &amp; Desktop</strong>, it reflows into side-by-side editorial spreads.
+          Collapses to a single vertical stream on <strong>Mobile (390px)</strong> and expands into 2, 3, or 4 column grids on <strong>Tablet &amp; Desktop</strong>.
         </p>
       </div>
 
-      {/* Desktop Split Ratio */}
+      {/* 2-Column Ratios */}
       <div>
         <label className="font-heading font-semibold block mb-1 text-neo-ink uppercase tracking-wider text-[11px]">
-          Laptop/Desktop Split Spread Ratio
+          2-Column Asymmetric Ratios
         </label>
         <div className="grid grid-cols-3 gap-1">
-          {(['50/50', '60/40', '40/60', '70/30', '30/70'] as const).map((ratio) => (
+          {twoColPresets.map((ratio) => (
             <button
               key={ratio}
               type="button"
               onClick={() => setProp((p: SplitContainerProps) => (p.desktopRatio = ratio))}
               className={`py-1.5 text-center font-mono border-neo border-neo-ink rounded transition-all ${
-                props.desktopRatio === ratio ? 'bg-neo-yellow font-bold shadow-neo-sm' : 'bg-white hover:bg-neo-bg'
+                props.desktopRatio === ratio
+                  ? 'bg-neo-yellow font-bold shadow-neo-sm'
+                  : 'bg-white hover:bg-neo-bg'
               }`}
             >
               {ratio}
@@ -208,10 +289,85 @@ export const SplitContainerSettings: React.FC = () => {
         </div>
       </div>
 
+      {/* 3-Column Ratios */}
+      <div>
+        <label className="font-heading font-semibold block mb-1 text-neo-ink uppercase tracking-wider text-[11px]">
+          3-Column Editorial Spreads
+        </label>
+        <div className="grid grid-cols-2 gap-1">
+          {threeColPresets.map((ratio) => (
+            <button
+              key={ratio}
+              type="button"
+              onClick={() => setProp((p: SplitContainerProps) => (p.desktopRatio = ratio))}
+              className={`py-1.5 text-center font-mono border-neo border-neo-ink rounded transition-all ${
+                props.desktopRatio === ratio
+                  ? 'bg-neo-yellow font-bold shadow-neo-sm'
+                  : 'bg-white hover:bg-neo-bg'
+              }`}
+            >
+              {ratio}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 4-Column & Bento Grid */}
+      <div>
+        <label className="font-heading font-semibold block mb-1 text-neo-ink uppercase tracking-wider text-[11px]">
+          4-Cell Grid &amp; Bento Layouts
+        </label>
+        <div className="grid grid-cols-2 gap-1">
+          {fourColPresets.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => setProp((p: SplitContainerProps) => (p.desktopRatio = preset.id))}
+              className={`py-1.5 text-center font-mono border-neo border-neo-ink rounded transition-all ${
+                props.desktopRatio === preset.id
+                  ? 'bg-neo-yellow font-bold shadow-neo-sm'
+                  : 'bg-white hover:bg-neo-bg'
+              }`}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tablet Breakpoint Behavior */}
+      <div>
+        <label className="font-heading font-semibold block mb-1 text-neo-ink uppercase tracking-wider text-[11px]">
+          Tablet (768px) Columns
+        </label>
+        <div className="grid grid-cols-3 gap-1">
+          {(
+            [
+              { id: 'auto', label: 'Auto' },
+              { id: '2', label: '2 Cols' },
+              { id: '1', label: '1 Col Stack' },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setProp((p: SplitContainerProps) => (p.tabletColumns = t.id))}
+              className={`py-1 text-center font-mono border-neo border-neo-ink rounded transition-all ${
+                (props.tabletColumns || 'auto') === t.id
+                  ? 'bg-neo-yellow font-bold shadow-neo-sm'
+                  : 'bg-white hover:bg-neo-bg'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Column Spacing */}
       <div>
         <label className="font-heading font-semibold block mb-1 text-neo-ink uppercase tracking-wider text-[11px]">
-          Column Gap
+          Grid / Column Gap
         </label>
         <div className="grid grid-cols-4 gap-1">
           {(['none', 'sm', 'md', 'lg'] as const).map((g) => (
@@ -241,7 +397,9 @@ export const SplitContainerSettings: React.FC = () => {
               type="button"
               onClick={() => setProp((p: SplitContainerProps) => (p.alignItems = a))}
               className={`py-1 text-center font-mono border-neo border-neo-ink rounded capitalize transition-all ${
-                props.alignItems === a ? 'bg-neo-yellow font-bold shadow-neo-sm' : 'bg-white hover:bg-neo-bg'
+                props.alignItems === a
+                  ? 'bg-neo-yellow font-bold shadow-neo-sm'
+                  : 'bg-white hover:bg-neo-bg'
               }`}
             >
               {a}
@@ -256,17 +414,23 @@ export const SplitContainerSettings: React.FC = () => {
           <input
             type="checkbox"
             checked={!!props.showDivider}
-            onChange={(e) => setProp((p: SplitContainerProps) => (p.showDivider = e.target.checked))}
+            onChange={(e) =>
+              setProp((p: SplitContainerProps) => (p.showDivider = e.target.checked))
+            }
             className="w-4 h-4 accent-neo-ink rounded"
           />
-          <span className="font-heading font-semibold text-neo-ink">Vertical Hairline Divider (Desktop)</span>
+          <span className="font-heading font-semibold text-neo-ink">
+            Vertical Hairline Divider (Desktop)
+          </span>
         </label>
 
         <label className="flex items-center gap-2 cursor-pointer border-neo border-neo-ink p-2 rounded bg-neo-bg/50">
           <input
             type="checkbox"
             checked={!!props.reverseOnMobile}
-            onChange={(e) => setProp((p: SplitContainerProps) => (p.reverseOnMobile = e.target.checked))}
+            onChange={(e) =>
+              setProp((p: SplitContainerProps) => (p.reverseOnMobile = e.target.checked))
+            }
             className="w-4 h-4 accent-neo-ink rounded"
           />
           <div className="flex flex-col">
@@ -274,7 +438,9 @@ export const SplitContainerSettings: React.FC = () => {
               <ArrowUpDown className="w-3 h-3 text-neo-vermilion" />
               Reverse Stack on Mobile
             </span>
-            <span className="text-[10px] text-gray-500 font-mono">Show right column above left column on phones</span>
+            <span className="text-[10px] text-gray-500 font-mono">
+              Invert cell order when stacked on phones
+            </span>
           </div>
         </label>
 
@@ -282,7 +448,9 @@ export const SplitContainerSettings: React.FC = () => {
           <input
             type="checkbox"
             checked={!!props.keepTogetherOnPageTurn}
-            onChange={(e) => setProp((p: SplitContainerProps) => (p.keepTogetherOnPageTurn = e.target.checked))}
+            onChange={(e) =>
+              setProp((p: SplitContainerProps) => (p.keepTogetherOnPageTurn = e.target.checked))
+            }
             className="w-4 h-4 accent-neo-ink rounded mt-0.5"
           />
           <div className="flex flex-col">
@@ -301,9 +469,10 @@ export const SplitContainerSettings: React.FC = () => {
 };
 
 SplitContainer.craft = {
-  displayName: 'Adaptive Split Container',
+  displayName: 'Adaptive Column / Grid',
   props: {
     desktopRatio: '60/40',
+    tabletColumns: 'auto',
     gap: 'md',
     alignItems: 'stretch',
     showDivider: false,

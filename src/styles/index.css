@@ -11,12 +11,83 @@
     background-color: #F4F1EA;
     color: #141414;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   ::selection {
     background-color: #FFD23F;
     color: #141414;
   }
+}
+
+/* ==========================================================================
+   Wyzard Dark Studio Theme (Midnight Obsidian Neo-Brutalist Appearance)
+   Applies across the Wyzard Studio UI while keeping the live e-book page
+   sheet ([data-book-page-sheet="true"]) true to its publication styling.
+   ========================================================================== */
+html.dark body {
+  background-color: #121316;
+  color: #F4F1EA;
+}
+
+html.dark .bg-neo-bg:not([data-book-page-sheet="true"] *),
+html.dark [data-stage-ui="true"] .bg-neo-bg {
+  background-color: #16181D !important;
+}
+
+html.dark .bg-neo-surface:not([data-book-page-sheet="true"] *),
+html.dark .bg-white:not([data-book-page-sheet="true"]):not([data-book-page-sheet="true"] *),
+html.dark [data-stage-ui="true"].bg-white,
+html.dark [data-stage-ui="true"] .bg-white {
+  background-color: #1E2026 !important;
+  color: #F4F1EA;
+}
+
+html.dark .text-neo-ink:not([data-book-page-sheet="true"] *):not(.bg-neo-yellow *):not(.bg-neo-yellow):not(.bg-neo-teal):not(.bg-neo-teal *),
+html.dark [data-stage-ui="true"] .text-neo-ink:not(.bg-neo-yellow):not(.bg-neo-teal) {
+  color: #F4F1EA !important;
+}
+
+html.dark .text-gray-500:not([data-book-page-sheet="true"] *),
+html.dark .text-gray-600:not([data-book-page-sheet="true"] *),
+html.dark .text-gray-700:not([data-book-page-sheet="true"] *) {
+  color: #A6ACB8 !important;
+}
+
+html.dark .border-neo-ink:not([data-book-page-sheet="true"] *),
+html.dark [data-stage-ui="true"] .border-neo-ink {
+  border-color: #383C47 !important;
+}
+
+html.dark .shadow-neo-sm:not([data-book-page-sheet="true"] *) {
+  box-shadow: 2px 2px 0px #08090B !important;
+}
+
+html.dark .shadow-neo:not([data-book-page-sheet="true"] *) {
+  box-shadow: 4px 4px 0px #08090B !important;
+}
+
+html.dark .shadow-neo-lg:not([data-book-page-sheet="true"] *) {
+  box-shadow: 6px 6px 0px #08090B !important;
+}
+
+html.dark input:not([type="color"]):not([data-book-page-sheet="true"] *),
+html.dark select:not([data-book-page-sheet="true"] *),
+html.dark textarea:not([data-book-page-sheet="true"] *) {
+  background-color: #14161A;
+  color: #F4F1EA;
+  border-color: #383C47;
+}
+
+html.dark main[data-stage-bg="true"] {
+  background-color: #121316 !important;
+  background-image: radial-gradient(rgba(244, 241, 234, 0.14) 1.25px, transparent 1.25px) !important;
+}
+
+/* Keep yellow & teal accent badges crisp with dark ink text in Dark Mode */
+html.dark .bg-neo-yellow,
+html.dark .bg-neo-teal {
+  color: #141414 !important;
 }
 
 /* Custom Scrollbars for Neo-Brutalist Panes */
@@ -30,8 +101,18 @@
   border-left: 1px solid #141414;
 }
 
+html.dark ::-webkit-scrollbar-track {
+  background: #16181D;
+  border-left: 1px solid #383C47;
+}
+
 ::-webkit-scrollbar-thumb {
   background: #141414;
+  border-radius: 4px;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #4B5162;
   border-radius: 4px;
 }
 

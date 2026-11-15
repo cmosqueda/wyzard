@@ -14,10 +14,17 @@ export const TemplatePickerModal: React.FC<TemplatePickerModalProps> = ({ isOpen
   if (!isOpen) return null;
 
   const handleSelectTemplate = async (template: StarterTemplate) => {
-    if (confirm(`Load "${template.name}"? This will replace your current workspace project.`)) {
+    if (confirm(`Load "${template.name}" into this layout? This will replace the current chapters.`)) {
       pushHistorySnapshot();
+      const currentProject = useEditorStore.getState().project;
+      const clonedTemplate = JSON.parse(JSON.stringify(template.project));
       useEditorStore.setState({
-        project: JSON.parse(JSON.stringify(template.project)),
+        project: {
+          ...clonedTemplate,
+          id: currentProject.id,
+          createdAt: currentProject.createdAt,
+          updatedAt: Date.now(),
+        },
       });
       await useEditorStore.getState().saveProjectToDb();
       onClose();

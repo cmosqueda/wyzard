@@ -1,57 +1,116 @@
-import React, { useEffect, useRef } from 'react';
-import { useEditor, Frame, Element } from '@craftjs/core';
+import React, { useEffect } from 'react';
+import { useEditor, Frame, Element, ROOT_NODE } from '@craftjs/core';
 import { useEditorStore } from '../../../store/editorStore';
+import { notify } from '../../../store/toastStore';
+import { getAssetDragData, hasAssetDragData } from '../../../utils/assetDragDrop';
+import { createDefaultChapterCraftJson, createChapter2StarterCraftJson } from '../../../db';
 import { CanvasContainer } from '../../blocks/CanvasContainer';
 import { TypographyBlock } from '../../blocks/TypographyBlock';
 import { ImageBlock } from '../../blocks/ImageBlock';
 import { HeroSpreadBlock } from '../../blocks/HeroSpreadBlock';
-import { SplitContainer } from '../../blocks/SplitContainer';
 import { CalloutCardBlock } from '../../blocks/CalloutCardBlock';
 import { OrnamentDividerBlock } from '../../blocks/OrnamentDividerBlock';
 
 export const CanvasFrame: React.FC = () => {
   const { actions, query } = useEditor();
-  const { project, updateChapterCraftState } = useEditorStore();
+  const { project, updateChapterCraftState, addAssetAttribution } = useEditorStore();
   const activeChapterId = project.activeChapterId;
-  const activeChapter = project.chapters.find((c) => c.id === activeChapterId);
-  const isInternalUpdateRef = useRef(false);
+  const chapterIndex = project.chapters.findIndex((c) => c.id === activeChapterId);
+  const activeChapter = project.chapters[chapterIndex] || project.chapters[0];
 
-  // Sync state changes from Craft.js back into Zustand & IndexedDB
-  useEffect(() => {
-    // Whenever Craft.js state changes (e.g. drop, edit props, reorder)
-    const timeout = setTimeout(() => {
-      try {
-        const json = query.serialize();
-        if (activeChapter && json !== activeChapter.craftStateJson) {
-          isInternalUpdateRef.current = true;
-          updateChapterCraftState(activeChapterId, json);
-        }
-      } catch (e) {
-        // serialize can throw if uninitialized
-      }
-    }, 400);
-
-    return () => clearTimeout(timeout);
-  });
-
-  // When active chapter changes from outside (e.g. clicked in spine)
-  useEffect(() => {
-    if (activeChapter && activeChapter.craftStateJson) {
-      if (isInternalUpdateRef.current) {
-        isInternalUpdateRef.current = false;
-        return;
-      }
-      try {
-        actions.deserialize(activeChapter.craftStateJson);
-      } catch (err) {
-        console.warn('Could not deserialize chapter state, keeping default:', err);
-      }
+  const handlePageDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (hasAssetDragData(e)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
     }
-  }, [activeChapterId]);
+  };
+
+  const handlePageDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    const payload = getAssetDragData(e);
+    if (!payload) return;
+    e.preventDefault();
+
+    try {
+      const captionCredit = `“${payload.title}” by ${payload.creator} • ${payload.license}`;
+      const tree = query
+        .parseReactElement(
+          <ImageBlock
+            src={payload.assetUrl}
+            alt={payload.title}
+            caption={captionCredit}
+            aspectRatio={payload.kind === 'vector' ? '1/1' : '4/5'}
+            fit={payload.kind === 'vector' ? 'contain' : 'cover'}
+            borderStyle="neo"
+          />
+        )
+        .toNodeTree();
+      actions.addNodeTree(tree, ROOT_NODE);
+
+      addAssetAttribution({
+        title: payload.title,
+        creator: payload.creator,
+        creatorUrl: payload.creatorUrl,
+        sourceName: payload.sourceName,
+        sourceUrl: payload.sourceUrl || payload.assetUrl,
+        license: payload.license,
+        licenseUrl: payload.licenseUrl,
+        assetUrl: payload.assetUrl,
+      });
+
+      notify({
+        type: 'success',
+        title: 'Dropped Asset onto Page',
+        message: `Inserted “${payload.title}” & credited ${payload.creator}.`,
+        duration: 2200,
+      });
+    } catch (err) {
+      console.warn('Could not drop asset onto page:', err);
+    }
+  };
+
+  // Resolve serialized Craft.js data for this chapter
+  const resolvedCraftData = (() => {
+    if (!activeChapter) return undefined;
+    if (activeChapter.craftStateJson && activeChapter.craftStateJson.trim() !== '') {
+      return activeChapter.craftStateJson;
+    }
+    // For Chapter 2+ when empty, provide a distinct chapter layout instead of duplicating Chapter 1
+    if (chapterIndex > 0) {
+      return activeChapter.id === 'ch-2'
+        ? createChapter2StarterCraftJson()
+        : createDefaultChapterCraftJson(activeChapter.title);
+    }
+    return undefined;
+  })();
+
+  // Persist initial default layout for Chapter 1 if it started empty, and handle Undo/Redo within same chapter
+  useEffect(() => {
+    if (!activeChapter) return;
+    try {
+      const currentSerialized = query.serialize();
+      if (!activeChapter.craftStateJson && currentSerialized && currentSerialized !== '{}') {
+        updateChapterCraftState(activeChapter.id, currentSerialized);
+      } else if (
+        activeChapter.craftStateJson &&
+        currentSerialized &&
+        activeChapter.craftStateJson !== currentSerialized
+      ) {
+        actions.deserialize(activeChapter.craftStateJson);
+      }
+    } catch (err) {
+      console.warn('Could not sync chapter state:', err);
+    }
+  }, [activeChapter?.craftStateJson]);
 
   return (
-    <div className="w-full h-full bg-white transition-colors duration-200">
-      <Frame>
+    <div
+      data-book-page-sheet="true"
+      onDragOver={handlePageDragOver}
+      onDrop={handlePageDrop}
+      className="w-full h-full transition-colors duration-200"
+      style={{ backgroundColor: activeChapter?.backgroundColor || '#FFFFFF' }}
+    >
+      <Frame data={resolvedCraftData}>
         <Element is={CanvasContainer} id="page-root" canvas>
           {/* Default starter blocks for Chapter 1 */}
           <HeroSpreadBlock

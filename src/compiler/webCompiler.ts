@@ -4,7 +4,7 @@ import { parseCraftState, type ParsedBlockNode } from './astParser';
 /**
  * Compiles a block node into clean semantic HTML5 markup for the web reader.
  */
-function renderWebNode(node: ParsedBlockNode): string {
+export function renderWebNode(node: ParsedBlockNode): string {
   const p = node.props;
 
   switch (node.type) {
@@ -91,18 +91,31 @@ function renderWebNode(node: ParsedBlockNode): string {
 
     case 'SplitContainer':
     case 'AdaptiveSplitContainer': {
-      const ratio = p.desktopRatio || '60/40';
+      const ratio: string = p.desktopRatio || '60/40';
       const gap = p.gap || 'md';
       const divider = p.showDivider ? 'has-divider' : '';
       const reverse = p.reverseOnMobile ? 'reverse-mobile' : '';
 
-      const leftCol = node.children[0] ? node.children[0].children.map(renderWebNode).join('\n') : '';
-      const rightCol = node.children[1] ? node.children[1].children.map(renderWebNode).join('\n') : '';
+      const cellCount =
+        ratio === '25/25/25/25' || ratio === 'bento-2x2'
+          ? 4
+          : ['33/33/33', '50/25/25', '25/50/25', '25/25/50'].includes(ratio)
+          ? 3
+          : 2;
+
+      const activeChildren = node.children.slice(0, cellCount);
+      const colsHtml = activeChildren
+        .map(
+          (colNode, idx) =>
+            `<div class="split-column column-${idx + 1}">${colNode.children
+              .map(renderWebNode)
+              .join('\n')}</div>`
+        )
+        .join('\n          ');
 
       return `
-        <div class="adaptive-split-container split-ratio-${ratio.replace('/', '-')} gap-${gap} ${divider} ${reverse}">
-          <div class="split-column column-left">${leftCol}</div>
-          <div class="split-column column-right">${rightCol}</div>
+        <div class="adaptive-split-container split-ratio-${ratio.replace(/\//g, '-')} gap-${gap} ${divider} ${reverse}">
+          ${colsHtml}
         </div>
       `;
     }
@@ -243,6 +256,105 @@ function renderWebNode(node: ParsedBlockNode): string {
       `;
     }
 
+    case 'FreeformCanvasBlock':
+    case 'FreeformCanvas': {
+      const ratio = p.aspectRatio || '16/9';
+      const bgType = p.backgroundType || 'solid';
+      const bg = p.backgroundColor || '#F4F1EA';
+      const caption = p.caption || '';
+      const layers: any[] = (p.layers || []).filter((l: any) => !l.hidden);
+
+      let artboardBgCss = `background-color:${bg};`;
+      if (bgType === 'transparent') {
+        artboardBgCss = 'background:transparent;border:none;box-shadow:none;';
+      } else if (bgType === 'gradient' && p.backgroundGradient) {
+        artboardBgCss = `background-image:${p.backgroundGradient};`;
+      } else if (bgType === 'image' && p.backgroundImage) {
+        artboardBgCss = `background-color:${bg};background-image:url("${p.backgroundImage}");background-size:cover;background-position:center;`;
+      } else if (bgType === 'pattern') {
+        artboardBgCss = `background-color:${bg};background-image:radial-gradient(rgba(20,20,20,0.2) 1.5px, transparent 1.5px);background-size:18px 18px;`;
+      }
+
+      const layersHtml = layers
+        .map((layer, idx) => {
+          const isPolygon =
+            layer.type === 'shape' &&
+            (layer.shapeKind === 'star' || layer.shapeKind === 'hexagon');
+          const radius =
+            layer.shapeKind === 'circle' || layer.shapeKind === 'pill'
+              ? '9999px'
+              : '8px';
+          const border =
+            !isPolygon && layer.type !== 'path' && layer.borderNeo
+              ? 'border: 2px solid #141414; box-shadow: 2px 2px 0px #141414;'
+              : '';
+          const bgStyle =
+            layer.type === 'image' || layer.type === 'path' || isPolygon
+              ? 'transparent'
+              : layer.fill || 'transparent';
+          const opacity = (layer.opacity ?? 100) / 100;
+          const sx = layer.flipX ? -1 : 1;
+          const sy = layer.flipY ? -1 : 1;
+          const blendCss =
+            layer.blendMode && layer.blendMode !== 'normal'
+              ? `mix-blend-mode:${layer.blendMode};`
+              : '';
+
+          let inner = '';
+          if (layer.type === 'path' && Array.isArray(layer.points) && layer.points.length > 0) {
+            const pts = layer.points
+              .map((pt: any, i: number) => `${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`)
+              .join(' ');
+            const d = layer.closed ? `${pts} Z` : pts;
+            const fill =
+              layer.closed && layer.fill && layer.fill !== 'transparent'
+                ? layer.fill
+                : 'none';
+            inner = `<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%;height:100%;overflow:visible;"><path d="${d}" fill="${fill}" stroke="${
+              layer.strokeColor || '#141414'
+            }" stroke-width="${layer.strokeWidth || 3}" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+          } else if (layer.type === 'image' && layer.imageSrc) {
+            inner = `<img src="${layer.imageSrc}" alt="${
+              layer.text || 'Graphic'
+            }" style="width:100%;height:100%;object-fit:contain;display:block;" />`;
+          } else if (isPolygon) {
+            const polyPoints =
+              layer.shapeKind === 'star'
+                ? '50,4 63,36 98,38 70,59 79,94 50,74 21,94 30,59 2,38 37,36'
+                : '25,5 75,5 98,50 75,95 25,95 2,50';
+            inner = `<svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;"><polygon points="${polyPoints}" fill="${
+              layer.fill || '#FFD23F'
+            }" stroke="${layer.strokeColor || '#141414'}" stroke-width="${
+              layer.strokeWidth || 2
+            }" stroke-linejoin="round" /></svg>`;
+          } else {
+            inner = `<span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:${
+              layer.fontSize || 14
+            }px;color:${layer.color || '#141414'};text-align:${
+              layer.textAlign || 'center'
+            };line-height:1.2;width:100%;">${layer.text || ''}</span>`;
+          }
+
+          return `<div style="position:absolute;left:${layer.x}%;top:${layer.y}%;width:${
+            layer.width
+          }%;height:${layer.height}%;z-index:${idx + 1};opacity:${opacity};transform:rotate(${
+            layer.rotation || 0
+          }deg) scale(${sx}, ${sy});${blendCss}background:${bgStyle};border-radius:${radius};${border}display:flex;align-items:center;justify-content:center;padding:4px;overflow:visible;">${inner}</div>`;
+        })
+        .join('\n          ');
+
+      return `
+        <figure class="editorial-image-figure">
+          <div class="image-aspect-wrapper aspect-${ratio.replace('/', '-')} ${
+        bgType === 'transparent' ? '' : 'image-frame-neo'
+      }" style="${artboardBgCss}position:relative;overflow:hidden;">
+            ${layersHtml}
+          </div>
+          ${caption ? `<figcaption class="editorial-caption">${caption}</figcaption>` : ''}
+        </figure>
+      `;
+    }
+
     default:
       return node.children.map(renderWebNode).join('\n');
   }
@@ -251,7 +363,7 @@ function renderWebNode(node: ParsedBlockNode): string {
 /**
  * Returns complete, self-contained CSS rules for the web publication.
  */
-function getWebPublicationStyles(): string {
+export function getWebPublicationStyles(): string {
   return `
 /* Base & Typography */
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -348,8 +460,9 @@ body {
 .hero-subtitle { font-size: 0.95rem; line-height: 1.5; margin-bottom: 0.75rem; opacity: 0.9; }
 .hero-author { font-family: "JetBrains Mono", monospace; font-size: 0.8rem; border-top: 1px solid rgba(0,0,0,0.1); padding-top: 0.5rem; opacity: 0.75; }
 
-/* Adaptive Split Container */
+/* Adaptive Split / Grid Container */
 .adaptive-split-container { display: flex; flex-direction: column; margin: 2rem 0; gap: 1.5rem; }
+.adaptive-split-container.reverse-mobile { flex-direction: column-reverse; }
 @media (min-width: 768px) {
   .adaptive-split-container { display: grid; }
   .split-ratio-50-50 { grid-template-columns: 1fr 1fr; }
@@ -357,8 +470,14 @@ body {
   .split-ratio-40-60 { grid-template-columns: 2fr 3fr; }
   .split-ratio-70-30 { grid-template-columns: 7fr 3fr; }
   .split-ratio-30-70 { grid-template-columns: 3fr 7fr; }
+  .split-ratio-33-33-33 { grid-template-columns: 1fr 1fr 1fr; }
+  .split-ratio-50-25-25 { grid-template-columns: 2fr 1fr 1fr; }
+  .split-ratio-25-50-25 { grid-template-columns: 1fr 2fr 1fr; }
+  .split-ratio-25-25-50 { grid-template-columns: 1fr 1fr 2fr; }
+  .split-ratio-25-25-25-25 { grid-template-columns: repeat(4, 1fr); }
+  .split-ratio-bento-2x2 { grid-template-columns: 1fr 1fr; }
 }
-.split-column { display: flex; flex-direction: column; gap: 1rem; }
+.split-column { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
 
 /* Callout Box */
 .editorial-callout {
@@ -494,13 +613,42 @@ body {
 .player-progress-bar { flex: 1; height: 8px; background: #eee; border: 1px solid #141414; border-radius: 4px; overflow: hidden; cursor: pointer; }
 .progress-fill { height: 100%; background: #141414; }
 .player-duration { font-family: "JetBrains Mono", monospace; font-size: 0.75rem; font-weight: 700; }
+
+/* Contributor Credits Colophon */
+.editorial-colophon {
+  margin-top: 3.5rem;
+  padding-top: 1.5rem;
+  border-top: 2px solid #141414;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8rem;
+  color: #444;
+}
+.colophon-heading {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #141414;
+  margin-bottom: 0.75rem;
+}
+.colophon-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.colophon-list a {
+  color: #FF5E3A;
+  text-decoration: underline;
+}
 `;
 }
 
 /**
  * Returns the zero-dependency vanilla JS runtime for web readers.
  */
-function getWebRuntimeJs(): string {
+export function getWebRuntimeJs(): string {
   return `
 document.addEventListener('DOMContentLoaded', function() {
   // 1. Accordion Drawer Toggles
@@ -619,6 +767,36 @@ export function compileWebPublication(project: BookProject, currentChapterId?: s
   const parsedNodes = parseCraftState(chapter?.craftStateJson || '');
 
   const renderedContent = parsedNodes.map(renderWebNode).join('\n');
+  const attributions = project.metadata.attributions || [];
+  const colophonHtml =
+    attributions.length > 0
+      ? `
+    <footer class="editorial-colophon" role="doc-colophon">
+      <h4 class="colophon-heading">Visual Asset Credits &amp; Attributions</h4>
+      <ul class="colophon-list">
+        ${attributions
+          .map(
+            (attr) => `
+          <li>
+            <strong>${attr.title}</strong> — By ${
+              attr.creatorUrl
+                ? `<a href="${attr.creatorUrl}" target="_blank" rel="noopener noreferrer">${attr.creator}</a>`
+                : attr.creator
+            } (${
+              attr.licenseUrl
+                ? `<a href="${attr.licenseUrl}" target="_blank" rel="noopener noreferrer">${attr.license}</a>`
+                : attr.license
+            }) via ${
+              attr.sourceUrl
+                ? `<a href="${attr.sourceUrl}" target="_blank" rel="noopener noreferrer">${attr.sourceName}</a>`
+                : attr.sourceName
+            }
+          </li>`
+          )
+          .join('\n')}
+      </ul>
+    </footer>`
+      : '';
 
   return `<!DOCTYPE html>
 <html lang="${project.metadata.language || 'en'}">
@@ -638,6 +816,7 @@ export function compileWebPublication(project: BookProject, currentChapterId?: s
   <div class="book-wrapper">
     <article>
       ${renderedContent}
+      ${colophonHtml}
     </article>
   </div>
   <script>

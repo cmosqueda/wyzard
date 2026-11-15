@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Wyzard — Reflowable & Visual E-Book Studio",
+  "short_name": "Wyzard",
+  "version": "1.0.0",
+  "description": "Local-first WYSIWYG e-book & visual layout studio with Freeform 2D Vector Canvas & Multi-Format compilation (.EPUB 3.3, .PDF, .CBZ, Web .ZIP).",
+  "permissions": [
+    "storage",
+    "unlimitedStorage"
+  ],
+  "action": {
+    "default_title": "Open Wyzard Studio"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
