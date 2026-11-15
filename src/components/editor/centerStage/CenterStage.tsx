@@ -76,7 +76,7 @@ export const CenterStage: React.FC = () => {
     }
   }, []);
 
-  // Hold Spacebar to temporarily pan canvas from anywhere
+  // Hold Spacebar to temporarily pan canvas, plus Ctrl + Plus/Minus/0 and Alt + Arrow hotkeys for zooming & panning
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -84,6 +84,54 @@ export const CenterStage: React.FC = () => {
         target.tagName === 'INPUT' ||
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable;
+
+      // Ctrl/Cmd + Plus/Minus/0 Zoom Hotkeys
+      if ((e.ctrlKey || e.metaKey) && !isInput) {
+        if (e.key === '=' || e.key === '+' || e.code === 'NumpadAdd') {
+          e.preventDefault();
+          const currentZoom = useEditorStore.getState().zoomLevel;
+          setZoomLevel(Math.min(250, currentZoom + 10));
+          return;
+        }
+        if (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') {
+          e.preventDefault();
+          const currentZoom = useEditorStore.getState().zoomLevel;
+          setZoomLevel(Math.max(25, currentZoom - 10));
+          return;
+        }
+        if (e.key === '0' || e.code === 'Numpad0') {
+          e.preventDefault();
+          setZoomLevel(100);
+          setPan({ x: 0, y: 0 });
+          return;
+        }
+      }
+
+      // Alt + Arrow Keys to Pan Canvas In/Out/Around
+      if (e.altKey && !isInput) {
+        const step = e.shiftKey ? 80 : 36;
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setPan((p) => ({ ...p, y: p.y + step }));
+          return;
+        }
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setPan((p) => ({ ...p, y: p.y - step }));
+          return;
+        }
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          setPan((p) => ({ ...p, x: p.x + step }));
+          return;
+        }
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          setPan((p) => ({ ...p, x: p.x - step }));
+          return;
+        }
+      }
+
       if (!isInput && e.code === 'Space' && !e.repeat) {
         e.preventDefault();
         setIsSpacePressed(true);
@@ -104,7 +152,25 @@ export const CenterStage: React.FC = () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [setZoomLevel]);
+
+  // Ctrl + Mouse Wheel to Zoom In/Out smoothly, or Shift + Wheel to Pan Horizontally
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const currentZoom = useEditorStore.getState().zoomLevel;
+        const delta = e.deltaY < 0 ? 10 : -10;
+        setZoomLevel(Math.max(25, Math.min(250, currentZoom + delta)));
+      }
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [setZoomLevel]);
 
   const canPanEverywhere = isPanMode || isSpacePressed;
 
@@ -118,11 +184,10 @@ export const CenterStage: React.FC = () => {
     const isDragHandle = Boolean(
       target.closest('[data-canvas-drag-handle="true"]')
     );
-    const isStageBackground =
-      target === stageRef.current ||
-      target.hasAttribute('data-stage-bg');
 
-    if (canPanEverywhere || e.button === 1 || isDragHandle || isStageBackground) {
+    // Only intercept pointer for panning when Pan Mode / Spacebar is active, middle-click, or dragging the device top bezel
+    // so normal touch/scroll on the page works effortlessly!
+    if (canPanEverywhere || e.button === 1 || isDragHandle) {
       e.preventDefault();
       setIsDraggingCanvas(true);
       dragStartRef.current = {
@@ -179,7 +244,7 @@ export const CenterStage: React.FC = () => {
         backgroundSize: '20px 20px',
         backgroundPosition: `${pan.x}px ${pan.y}px`,
       }}
-      className={`flex-1 bg-neo-bg h-full overflow-hidden relative flex flex-col items-center py-3 sm:py-5 px-2 sm:px-4 select-none min-w-0 ${
+      className={`flex-1 bg-neo-bg h-full min-h-0 overflow-y-auto overflow-x-auto relative flex flex-col items-center py-3 sm:py-5 px-2 sm:px-4 select-none min-w-0 ${
         isDraggingCanvas
           ? 'cursor-grabbing'
           : canPanEverywhere
@@ -302,7 +367,7 @@ export const CenterStage: React.FC = () => {
       {/* Draggable & Responsively Scaled Device Viewport Frame */}
       <div
         data-stage-bg="true"
-        className="flex-1 w-full flex justify-center items-start overflow-visible"
+        className="flex-1 w-full flex justify-center items-start pb-16"
       >
         <div
           style={{
@@ -320,7 +385,6 @@ export const CenterStage: React.FC = () => {
             style={{
               width: `${preset.width}px`,
               minHeight: `${preset.height}px`,
-              maxHeight: 'calc(100vh - 135px)',
             }}
           >
             {/* Draggable Device Bezel / Top Handle Bar */}

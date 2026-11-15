@@ -143,7 +143,7 @@ export const WorkspaceManager: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen w-screen bg-neo-bg text-neo-ink flex flex-col select-none overflow-y-auto">
+    <div className="h-screen w-full bg-neo-bg text-neo-ink flex flex-col overflow-y-auto overflow-x-hidden">
       {/* Top Header */}
       <header className="min-h-16 bg-neo-surface border-b-neo border-neo-ink px-3 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 sticky top-0 z-20">
         <div className="flex items-center gap-2 sm:gap-3">

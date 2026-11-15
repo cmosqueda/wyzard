@@ -50,6 +50,7 @@ import {
   CheckSquare,
   Grid,
   Loader2,
+  GripVertical,
 } from 'lucide-react';
 
 export type LayerShapeKind = 'rect' | 'circle' | 'pill' | 'star' | 'hexagon' | 'diamond';
@@ -463,6 +464,8 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
   const addAssetAttribution = useEditorStore((s) => s.addAssetAttribution);
 
   const [activeTool, setActiveTool] = useState<ActiveTool>('select');
+  // Lock state editing mode: locks the canvas block in place so dragging/long-pressing assets inside never moves the block itself
+  const [isCanvasEditingLocked, setIsCanvasEditingLocked] = useState<boolean>(true);
   // Multi-selection array of layer IDs
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
@@ -853,6 +856,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
 
     // In Select mode, clicking/dragging on empty artboard starts a Marquee Selection box
     e.stopPropagation();
+    boardRef.current?.setPointerCapture?.(e.pointerId);
     setEditingTextId(null);
     const pt = getRelativeBoardCoords(e.clientX, e.clientY);
     if (!e.shiftKey) {
@@ -1086,6 +1090,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
 
     if (dragStateRef.current) {
       e.stopPropagation();
+      boardRef.current?.releasePointerCapture?.(e.pointerId);
       dragStateRef.current = null;
       setSnapGuide({ x: null, y: null });
       setRotatingAngleBadge(null);
@@ -1135,6 +1140,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
 
     if (layer.locked || editingTextId === layer.id) return;
 
+    boardRef.current?.setPointerCapture?.(e.pointerId);
     dragStateRef.current = {
       mode: 'move',
       primaryId: layer.id,
@@ -1151,6 +1157,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
   ) => {
     e.stopPropagation();
     if (layer.locked) return;
+    boardRef.current?.setPointerCapture?.(e.pointerId);
     const activeIds = selectedIds.includes(layer.id) ? selectedIds : [layer.id];
     dragStateRef.current = {
       mode: 'resize',
@@ -1168,6 +1175,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
   ) => {
     e.stopPropagation();
     if (layer.locked || !boardRef.current) return;
+    boardRef.current.setPointerCapture?.(e.pointerId);
     const rect = boardRef.current.getBoundingClientRect();
     const centerX = rect.left + ((layer.x + layer.width / 2) / 100) * rect.width;
     const centerY = rect.top + ((layer.y + layer.height / 2) / 100) * rect.height;
@@ -1584,7 +1592,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
   return (
     <figure
       ref={(ref) => {
-        if (ref) connect(drag(ref));
+        if (ref) connect(ref);
       }}
       data-stage-ui="true"
       className={`relative my-4 rounded-xl transition-all select-none ${
@@ -1597,8 +1605,51 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
     >
       {/* Top Vector & Artboard Studio Bar */}
       <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2 bg-neo-ink text-white px-2.5 py-2 rounded-lg border-neo border-neo-ink shadow-neo-sm text-[10px] font-mono">
-        {/* Tool Modes: Select | Pen | Freehand Brush */}
+        {/* Lock Canvas Editing State + Tool Modes: Select | Pen | Freehand Brush */}
         <div className="flex flex-wrap items-center gap-1">
+          {/* Canvas Edit Lock Toggle (Prevents dragging assets inside from moving the whole canvas block!) */}
+          <button
+            type="button"
+            onClick={() => setIsCanvasEditingLocked((prev) => !prev)}
+            className={`px-2 py-1 rounded flex items-center gap-1 font-bold transition-colors border ${
+              isCanvasEditingLocked
+                ? 'bg-neo-teal text-neo-ink border-neo-teal'
+                : 'bg-neo-vermilion text-white border-white/40'
+            }`}
+            title={
+              isCanvasEditingLocked
+                ? 'Canvas Edit Locked: Long-pressing and dragging assets inside stays strictly inside this canvas. Click to unlock block reordering.'
+                : 'Block Move Unlocked: Use the Move Block grip to reorder this canvas block on the page. Click to lock for canvas editing.'
+            }
+          >
+            {isCanvasEditingLocked ? (
+              <>
+                <Lock className="w-3 h-3" />
+                <span>Edit Locked</span>
+              </>
+            ) : (
+              <>
+                <Unlock className="w-3 h-3" />
+                <span>Unlocked</span>
+              </>
+            )}
+          </button>
+
+          {!isCanvasEditingLocked && (
+            <span
+              ref={(ref) => {
+                if (ref) drag(ref);
+              }}
+              className="px-2 py-1 rounded bg-neo-yellow text-neo-ink font-bold flex items-center gap-1 cursor-grab active:cursor-grabbing"
+              title="Drag here to move this Fixed Visual Canvas block up/down between other page blocks"
+            >
+              <GripVertical className="w-3 h-3" />
+              <span>Move Block</span>
+            </span>
+          )}
+
+          <div className="h-4 w-[1px] bg-white/20 mx-0.5" />
+
           <button
             type="button"
             onClick={() => {
@@ -2325,11 +2376,21 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
         onPointerDown={handleBoardPointerDown}
         onPointerMove={handleBoardPointerMove}
         onPointerUp={handleBoardPointerUp}
+        onPointerCancel={handleBoardPointerUp}
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        onDragStart={(e) => {
+          // Prevent Craft.js block drag from firing when dragging layers inside the artboard
+          if (isCanvasEditingLocked) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
         onDragOver={handleBoardDragOver}
         onDragEnter={handleBoardDragOver}
         onDragLeave={handleBoardDragLeave}
         onDrop={handleBoardDrop}
-        style={artboardBgStyle}
+        style={{ ...artboardBgStyle, touchAction: 'none' }}
         className={`w-full ${getAspectClass()} relative overflow-hidden border-neo border-neo-ink rounded-xl shadow-neo transition-all ${
           activeTool !== 'select' ? 'cursor-crosshair' : ''
         } ${isDragOverBoard ? 'ring-4 ring-neo-teal border-neo-teal' : ''}`}

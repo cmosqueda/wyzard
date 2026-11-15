@@ -31,7 +31,7 @@ export const RightRail: React.FC = () => {
             : 'fixed lg:static inset-y-0 right-0 z-40 w-0 max-w-0 border-l-0 overflow-hidden translate-x-full lg:translate-x-0 opacity-0 lg:opacity-100 pointer-events-none'
         }`}
       >
-        <div className="w-[86vw] max-w-[320px] lg:w-80 h-full flex flex-col">
+        <div className="w-[86vw] max-w-[320px] lg:w-80 h-full min-h-0 flex flex-col">
           {/* Top Tabs + Mobile Close Button */}
           <div className="flex items-center border-b-neo border-neo-ink bg-neo-bg/70 p-1.5 gap-1.5">
             <div className="grid grid-cols-2 flex-1 gap-1.5">
@@ -70,7 +70,7 @@ export const RightRail: React.FC = () => {
           </div>
 
           {/* Tab Content */}
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-y-auto">
             {activeInspectorTab === 'block' ? <BlockInspector /> : <ProjectInspector />}
           </div>
         </div>
