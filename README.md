@@ -68,9 +68,9 @@ One design, four targets: an offline **HTML .ZIP** pack, a paginated **PDF**, a 
 Projects live in your browser's IndexedDB, are saved on every change, and **come back after an accidental refresh** (same project, chapter, viewport and zoom). Browse, duplicate and rename layouts in the workspace, or start from a template.
 
 **Your work is protected from browser data wipes:**
-- **Backup folder** (Chrome, Edge and other Chromium browsers): pick a folder once and Wyzard mirrors every project and uploaded image / audio file into it after each change. Put it inside Dropbox, OneDrive or iCloud for cloud backup. After clearing browser data, choose the same folder again to restore everything.
+- **Backup folder (local disk write):** pick a folder once and Wyzard mirrors every project and uploaded image / audio file into it after each change. Put it inside Dropbox, OneDrive or iCloud for cloud backup. After clearing browser data, choose the same folder again to restore everything. **This feature uses the [File System Access API](https://developer.mozilla.org/docs/Web/API/File_System_API), so it only works in supported browsers:** Chromium-based browsers such as Chrome, Edge, Brave and Opera, on a secure origin (`https://` or `localhost`) or in the Wyzard browser extension. Firefox and Safari do not support it yet; there, use *Export All* (below). Browsers ask for the folder permission again after a restart, and Wyzard prompts you to reconnect.
 - **Reminders:** a banner and an editor status chip nudge you weekly until you have a backup, and tell you when the folder needs permission again after a browser restart.
-- **Portable backups:** *Settings → Export All* downloads a `.wyzard.json` that embeds your uploaded files, and *Import* restores it in any browser.
+- **Portable backups (every browser):** *Settings → Export All* downloads a `.wyzard.json` that embeds your uploaded files, and *Import* restores it in any browser.
 - Uploaded images and audio are re-linked automatically every time a project opens, so they survive reloads.
 
 <p align="center">
