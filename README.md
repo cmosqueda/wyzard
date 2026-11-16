@@ -10,6 +10,7 @@
 <p align="center">
   <a href="https://github.com/cmosqueda/wyzard/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/cmosqueda/wyzard?color=FFD23F&labelColor=141414" /></a>
   <img alt="Free and open source" src="https://img.shields.io/badge/free-%26%20open%20source-FF5E3A?labelColor=141414" />
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-FFD23F?labelColor=141414" /></a>
   <img alt="Local first" src="https://img.shields.io/badge/local--first-no%20account%20needed-3BCEAC?labelColor=141414" />
 </p>
 
@@ -191,3 +192,9 @@ flowchart TD
 **Open content & services:** [Openverse](https://openverse.org) (openly licensed images, license per work) · [Iconify](https://iconify.design) (vector icon search, license per icon set) · [Adamsdesk](https://www.adamsdesk.com/posts/free-design-asset-resource/) (free design asset directory) · [Unsplash](https://unsplash.com) (sample photographs in the starter templates, Unsplash License) · [Graphite](https://graphite.rs) (Apache-2.0, design inspiration for the vector canvas).
 
 Assets inserted from the asset library are logged automatically in **Metadata → Contributor Credits** and written into the exported colophon.
+
+---
+
+## 📄 License
+
+Wyzard is released under the [MIT License](LICENSE). You are free to use, copy, modify and distribute it, including commercially, as long as the license and copyright notice are kept. Third-party projects listed above remain under their own licenses.
