@@ -1,7 +1,9 @@
+<p align="center"><img src="public/logo-wordmark.svg" alt="Wyzard" height="72" /></p>
+
 # Wyzard 🪄
 ### Mobile-First Interactive Ebook & Editorial WYSIWYG Designer
 
-> **Version:** 1.0 (MVP Complete)  
+> **Version:** 1.1.0  
 > **Output Targets:** Responsive Editorial Web Publications + Valid EPUB 3.3 Packages  
 > **Design Language:** Playful Neo-Brutalism  
 

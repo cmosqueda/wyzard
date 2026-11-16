@@ -3,7 +3,8 @@ import { EditorWorkspace } from './components/editor/EditorWorkspace';
 import { WorkspaceManager } from './components/workspace/WorkspaceManager';
 import { ToastContainer, WyzardErrorBoundary } from './components/ui/ToastContainer';
 import { useEditorStore } from './store/editorStore';
-import { BookOpen, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { WyzardLogo } from './components/ui/WyzardLogo';
 
 export const App: React.FC = () => {
   const isWorkspaceOpen = useEditorStore((state) => state.isWorkspaceOpen);
@@ -50,12 +51,12 @@ export const App: React.FC = () => {
       {(isTransitioning || isRestoring) && (
         <div className="fixed inset-0 z-[90] bg-neo-bg/85 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150 select-none">
           <div className="bg-white border-neo-thick border-neo-ink rounded-2xl shadow-neo-lg px-6 py-5 flex items-center gap-3.5">
-            <div className="p-2 bg-neo-yellow rounded-xl border-2 border-neo-ink shadow-neo-sm flex items-center justify-center">
-              <Loader2 className="w-5 h-5 text-neo-ink animate-spin" strokeWidth={2.5} />
+            <div className="relative">
+              <WyzardLogo size={44} />
+              <Loader2 className="absolute -right-2 -bottom-2 w-5 h-5 p-0.5 rounded-full bg-white border-2 border-neo-ink text-neo-ink animate-spin" strokeWidth={2.5} />
             </div>
             <div>
               <div className="flex items-center gap-1.5 font-heading font-bold text-sm text-neo-ink">
-                <BookOpen className="w-4 h-4 text-neo-vermilion" />
                 <span>Wyzard Studio</span>
               </div>
               <p className="font-mono text-xs text-gray-600 mt-0.5">

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, createStarterProject, createBlankProject } from '../../db';
+import { WyzardLogo } from '../ui/WyzardLogo';
 import { syncAllWithLocalFs } from '../../db/localFs';
 import { useEditorStore } from '../../store/editorStore';
 import { notify } from '../../store/toastStore';
@@ -147,9 +148,9 @@ export const WorkspaceManager: React.FC = () => {
       {/* Top Header */}
       <header className="min-h-16 bg-neo-surface border-b-neo border-neo-ink px-3 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 sticky top-0 z-20">
         <div className="flex items-center gap-2 sm:gap-3">
-          <div className="flex items-center gap-2 bg-neo-ink text-white px-2.5 sm:px-3 py-1.5 rounded-md shadow-neo-sm">
-            <BookOpen className="w-4 h-4 sm:w-5 sm:h-5 text-neo-yellow" strokeWidth={2.5} />
-            <span className="font-heading font-bold text-base sm:text-lg tracking-tight">WYZARD</span>
+          <div className="flex items-center gap-2.5">
+            <WyzardLogo size={36} />
+            <span className="font-heading font-bold text-lg sm:text-xl tracking-tight text-neo-ink">WYZARD</span>
             <span className="text-[10px] font-mono uppercase bg-neo-vermilion text-white px-1.5 py-0.2 rounded font-bold">
               STUDIO
             </span>

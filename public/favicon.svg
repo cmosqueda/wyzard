@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Wyzard">
+  <title>Wyzard</title>
+  <!-- Hard offset shadow -->
+  <rect x="7" y="7" width="54" height="54" rx="11" fill="#141414"/>
+  <!-- Tile -->
+  <rect x="3" y="3" width="54" height="54" rx="11" fill="#FFD23F" stroke="#141414" stroke-width="3"/>
+  <!-- W: sharp, hat-peaked centre stroke -->
+  <path d="M13 21 L21.5 47 L30 27 L38.5 47 L47 21" fill="none" stroke="#141414" stroke-width="7" stroke-linejoin="miter" stroke-miterlimit="6" stroke-linecap="butt"/>
+  <!-- Magic spark above the peak -->
+  <path d="M30 6.5 L32.4 12.1 L38 14.5 L32.4 16.9 L30 22.5 L27.6 16.9 L22 14.5 L27.6 12.1 Z" fill="#FF5E3A" stroke="#141414" stroke-width="2" stroke-linejoin="round"/>
+</svg>
