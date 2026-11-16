@@ -210,7 +210,7 @@ export const WebReaderModal: React.FC<WebReaderModalProps> = ({
   <meta charset="UTF-8" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
   <style>
-    ${getWebPublicationStyles()}
+    ${getWebPublicationStyles(project.designSystem)}
     html, body {
       margin: 0;
       padding: 0;

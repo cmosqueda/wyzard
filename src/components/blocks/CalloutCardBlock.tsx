@@ -1,3 +1,4 @@
+import { MathText } from '../ui/MathText';
 import React from 'react';
 import { useNode, type UserComponent } from '@craftjs/core';
 import { Bookmark, Sparkles, AlertCircle, Info, Lightbulb, Quote } from 'lucide-react';
@@ -115,18 +116,15 @@ export const CalloutCardBlock: UserComponent<CalloutCardProps> = ({
         </span>
       </div>
 
-      <div
-        contentEditable
-        suppressContentEditableWarning
-        onBlur={(e) => {
+      <MathText
+        value={content}
+        onChange={(v) =>
           setProp((props: CalloutCardProps) => {
-            props.content = e.currentTarget.textContent || '';
-          });
-        }}
-        className="font-sans text-xs leading-relaxed focus:outline-none opacity-90"
-      >
-        {content}
-      </div>
+            props.content = v;
+          })
+        }
+        className="font-sans text-xs leading-relaxed opacity-90"
+      />
     </aside>
   );
 };

@@ -23,6 +23,7 @@ export const CanvasContainer: UserComponent<CanvasContainerProps> = ({
       ref={(ref) => {
         if (ref) connect(ref);
       }}
+      data-drop-zone="true"
       className="w-full min-h-[700px] flex flex-col gap-6 transition-all duration-200"
       style={{
         backgroundColor,

@@ -3,7 +3,11 @@ import { useEditor, Frame, Element, ROOT_NODE } from '@craftjs/core';
 import { useEditorStore } from '../../../store/editorStore';
 import { notify } from '../../../store/toastStore';
 import { getAssetDragData, hasAssetDragData } from '../../../utils/assetDragDrop';
-import { createDefaultChapterCraftJson, createChapter2StarterCraftJson } from '../../../db';
+import {
+  createDefaultChapterCraftJson,
+  createChapter2StarterCraftJson,
+  createEmptyChapterCraftJson,
+} from '../../../db';
 import { CanvasContainer } from '../../blocks/CanvasContainer';
 import { TypographyBlock } from '../../blocks/TypographyBlock';
 import { ImageBlock } from '../../blocks/ImageBlock';
@@ -12,11 +16,14 @@ import { CalloutCardBlock } from '../../blocks/CalloutCardBlock';
 import { OrnamentDividerBlock } from '../../blocks/OrnamentDividerBlock';
 
 export const CanvasFrame: React.FC = () => {
-  const { actions, query } = useEditor();
+  const { actions, query, isBlockDragging } = useEditor((state) => ({
+    isBlockDragging: state.events.dragged.size > 0,
+  }));
   const { project, updateChapterCraftState, addAssetAttribution } = useEditorStore();
   const activeChapterId = project.activeChapterId;
   const chapterIndex = project.chapters.findIndex((c) => c.id === activeChapterId);
   const activeChapter = project.chapters[chapterIndex] || project.chapters[0];
+  const isPlain = project.designSystem === 'plain';
 
   const handlePageDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     if (hasAssetDragData(e)) {
@@ -75,6 +82,7 @@ export const CanvasFrame: React.FC = () => {
       return activeChapter.craftStateJson;
     }
     // For Chapter 2+ when empty, provide a distinct chapter layout instead of duplicating Chapter 1
+    if (isPlain) return createEmptyChapterCraftJson();
     if (chapterIndex > 0) {
       return activeChapter.id === 'ch-2'
         ? createChapter2StarterCraftJson()
@@ -105,6 +113,8 @@ export const CanvasFrame: React.FC = () => {
   return (
     <div
       data-book-page-sheet="true"
+      data-design-system={isPlain ? 'plain' : 'wyzard'}
+      data-block-dragging={isBlockDragging ? 'true' : 'false'}
       onDragOver={handlePageDragOver}
       onDrop={handlePageDrop}
       className="w-full h-full transition-colors duration-200"
@@ -112,7 +122,8 @@ export const CanvasFrame: React.FC = () => {
     >
       <Frame data={resolvedCraftData}>
         <Element is={CanvasContainer} id="page-root" canvas>
-          {/* Default starter blocks for Chapter 1 */}
+          {/* Default starter blocks for Chapter 1 (Wyzard design system only; 'plain' starts blank) */}
+          {!isPlain && <>
           <HeroSpreadBlock
             kicker="CHAPTER OPENER"
             title="The Art of Reflowable Design"
@@ -144,6 +155,7 @@ export const CanvasFrame: React.FC = () => {
             keepTogetherOnPageTurn={true}
           />
           <OrnamentDividerBlock type="asterisms" spacingY="md" />
+          </>}
         </Element>
       </Frame>
     </div>

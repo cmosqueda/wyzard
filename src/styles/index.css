@@ -84,10 +84,188 @@ html.dark main[data-stage-bg="true"] {
   background-image: radial-gradient(rgba(244, 241, 234, 0.14) 1.25px, transparent 1.25px) !important;
 }
 
+/* Opacity-variant, hover and gray-scale surfaces that the exact-class rules above do not match.
+   Without these, panels such as the rail tab bars, workspace cards and hover states stay light
+   (washed-out grey) in Dark Mode. */
+html.dark .bg-neo-bg\/40:not([data-book-page-sheet] *),
+html.dark .bg-neo-bg\/50:not([data-book-page-sheet] *),
+html.dark .bg-neo-bg\/60:not([data-book-page-sheet] *),
+html.dark .bg-neo-bg\/70:not([data-book-page-sheet] *),
+html.dark .bg-neo-bg\/80:not([data-book-page-sheet] *),
+html.dark .bg-neo-bg\/85:not([data-book-page-sheet] *) {
+  background-color: rgba(22, 24, 29, 0.92) !important;
+}
+
+html.dark .bg-neo-surface\/70:not([data-book-page-sheet] *),
+html.dark .bg-white\/95:not([data-book-page-sheet] *),
+html.dark .bg-white\/90:not([data-book-page-sheet] *) {
+  background-color: rgba(30, 32, 38, 0.92) !important;
+  color: #F4F1EA;
+}
+
+html.dark .bg-gray-100:not([data-book-page-sheet] *),
+html.dark .bg-gray-200:not([data-book-page-sheet] *),
+html.dark .bg-gray-300:not([data-book-page-sheet] *) {
+  background-color: #2A2D36 !important;
+}
+
+html.dark .hover\:bg-white:hover:not([data-book-page-sheet] *),
+html.dark .hover\:bg-neo-bg:hover:not([data-book-page-sheet] *),
+html.dark .hover\:bg-neo-bg\/60:hover:not([data-book-page-sheet] *),
+html.dark .hover\:bg-white\/60:hover:not([data-book-page-sheet] *),
+html.dark .hover\:bg-white\/70:hover:not([data-book-page-sheet] *) {
+  background-color: #2A2D36 !important;
+  color: #F4F1EA;
+}
+
+html.dark .text-gray-300:not([data-book-page-sheet] *),
+html.dark .text-gray-400:not([data-book-page-sheet] *),
+html.dark .text-gray-800:not([data-book-page-sheet] *) {
+  color: #A6ACB8 !important;
+}
+
+html.dark .divide-neo-ink\/20 > :not([hidden]) ~ :not([hidden]):not([data-book-page-sheet] *) {
+  border-color: #383C47;
+}
+
+html.dark .bg-neo-ink\/10:not([data-book-page-sheet] *) {
+  background-color: rgba(244, 241, 234, 0.08) !important;
+}
+
+/* ==========================================================================
+   Cursor rules for the page canvas
+   - text cursor over editable text (so dragging there selects characters)
+   - grab cursor over a block's own frame/padding (where dragging moves the block)
+   - pointer over controls; resize cursors are set by the handles themselves
+   While a block is being dragged, the places that can accept it are outlined.
+   ========================================================================== */
+[data-book-page-sheet] [draggable="true"] {
+  cursor: grab;
+}
+[data-book-page-sheet] [draggable="true"]:active {
+  cursor: grabbing;
+}
+[data-book-page-sheet] [contenteditable="true"],
+[data-book-page-sheet] [contenteditable=""] {
+  cursor: text;
+}
+[data-book-page-sheet] button,
+[data-book-page-sheet] summary,
+[data-book-page-sheet] a {
+  cursor: pointer;
+}
+[data-book-page-sheet] input,
+[data-book-page-sheet] textarea {
+  cursor: text;
+}
+/* Draggable controls (e.g. hotspot pins) keep their grab cursor */
+[data-book-page-sheet] button.cursor-grab {
+  cursor: grab;
+}
+[data-book-page-sheet] button.cursor-grabbing {
+  cursor: grabbing;
+}
+
+[data-book-page-sheet][data-block-dragging="true"] [data-drop-zone="true"] {
+  outline: 2px dashed #3BCEAC;
+  outline-offset: -3px;
+  background-color: rgba(59, 206, 172, 0.06);
+}
+
+/* LaTeX math placeholders (Typography) */
+.wz-math {
+  display: inline-block;
+  vertical-align: baseline;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 2px;
+  user-select: none;
+}
+.wz-math:hover {
+  background-color: rgba(155, 93, 229, 0.14);
+}
+.wz-math[data-display="1"] {
+  display: block;
+  text-align: center;
+  margin: 0.5em 0;
+}
+.wz-math:empty::before {
+  content: "∑";
+  opacity: 0.4;
+}
+
+/* Hyperlinks inside text blocks */
+[data-book-page-sheet] [contenteditable] a {
+  color: #2563EB;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
 /* Keep yellow & teal accent badges crisp with dark ink text in Dark Mode */
 html.dark .bg-neo-yellow,
 html.dark .bg-neo-teal {
   color: #141414 !important;
+}
+
+/* ==========================================================================
+   "Plain" canvas design system — a blank, unthemed page (like Canva / Figma).
+   Scoped to the page sheet only, so the Wyzard app chrome keeps its own theme.
+   It neutralises the neo-brutalist borders, hard shadows, accent colours and
+   display fonts that blocks use under the "wyzard" design system.
+   ========================================================================== */
+main[data-stage-bg="true"][data-design-system="plain"] {
+  background-color: #E8E8EA !important;
+  background-image: none !important;
+}
+html.dark main[data-stage-bg="true"][data-design-system="plain"] {
+  background-color: #1B1B1D !important;
+  background-image: none !important;
+}
+
+[data-book-page-sheet][data-design-system="plain"] {
+  font-family: Arial, Helvetica, sans-serif;
+  color: #111111;
+}
+[data-book-page-sheet][data-design-system="plain"] .font-heading,
+[data-book-page-sheet][data-design-system="plain"] .font-sans,
+[data-book-page-sheet][data-design-system="plain"] .font-mono {
+  font-family: Arial, Helvetica, sans-serif;
+}
+[data-book-page-sheet][data-design-system="plain"] .border-neo,
+[data-book-page-sheet][data-design-system="plain"] .border-neo-thick {
+  border-width: 1px;
+}
+[data-book-page-sheet][data-design-system="plain"] .border-neo-ink,
+[data-book-page-sheet][data-design-system="plain"] [class*="border-neo-ink/"] {
+  border-color: #D1D5DB;
+}
+[data-book-page-sheet][data-design-system="plain"] .shadow-neo,
+[data-book-page-sheet][data-design-system="plain"] .shadow-neo-sm,
+[data-book-page-sheet][data-design-system="plain"] .shadow-neo-lg,
+[data-book-page-sheet][data-design-system="plain"] .shadow-neo-yellow,
+[data-book-page-sheet][data-design-system="plain"] .shadow-neo-vermilion {
+  box-shadow: none;
+}
+[data-book-page-sheet][data-design-system="plain"] .bg-neo-yellow,
+[data-book-page-sheet][data-design-system="plain"] .bg-neo-teal,
+[data-book-page-sheet][data-design-system="plain"] .bg-neo-bg {
+  background-color: #F3F4F6;
+  color: #111111;
+}
+[data-book-page-sheet][data-design-system="plain"] .bg-neo-vermilion,
+[data-book-page-sheet][data-design-system="plain"] .bg-neo-violet {
+  background-color: #374151;
+  color: #FFFFFF;
+}
+[data-book-page-sheet][data-design-system="plain"] .rounded-lg,
+[data-book-page-sheet][data-design-system="plain"] .rounded-xl {
+  border-radius: 2px;
+}
+[data-book-page-sheet][data-design-system="plain"] .text-neo-vermilion,
+[data-book-page-sheet][data-design-system="plain"] .text-neo-violet,
+[data-book-page-sheet][data-design-system="plain"] .text-neo-teal {
+  color: #374151;
 }
 
 /* Custom Scrollbars for Neo-Brutalist Panes */

@@ -307,7 +307,7 @@ export const AssetLibrary: React.FC = () => {
   const {
     project,
     addAssetAttribution,
-    setActiveInspectorTab,
+    setMetadataOpen,
   } = useEditorStore();
 
   const [subTab, setSubTab] = useState<'openverse' | 'vectors' | 'packs'>('openverse');
@@ -702,9 +702,9 @@ export const AssetLibrary: React.FC = () => {
         </div>
 
         <button
-          onClick={() => setActiveInspectorTab('project')}
+          onClick={() => setMetadataOpen(true)}
           className="flex items-center gap-1 bg-white border border-neo-ink px-2 py-1 rounded shadow-neo-sm text-[10px] font-mono font-bold hover:bg-neo-yellow transition-colors"
-          title="View Contributor Credits Ledger in Metadata Inspector"
+          title="View Contributor Credits Ledger in Book Metadata"
         >
           <Award className="w-3 h-3 text-neo-vermilion" />
           <span>{attributionCount} Credits</span>

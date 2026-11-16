@@ -1,9 +1,23 @@
-import type { BookProject, Chapter } from '../types/ast';
+import type { BookProject, Chapter, CanvasDesignSystem } from '../types/ast';
 import { parseCraftState, type ParsedBlockNode } from './astParser';
+import { googleFontsHref, googleFontStack } from '../utils/googleFonts';
+import { getArtboardHeightRatio, getArtboardWidthPct } from '../utils/artboard';
+import { KATEX_CSS_HREF, hasMath, htmlHasMath, renderMathInHtml, renderMathInText } from '../utils/math';
+
+const MATH_CSS_LINK = `<link rel="stylesheet" href="${KATEX_CSS_HREF}">`;
+
+/** Plain text field that may contain `$…$` LaTeX. Non-math text is passed through unchanged (legacy behaviour). */
+function withMath(text: string): string {
+  return hasMath(text) ? MATH_CSS_LINK + renderMathInText(text) : text;
+}
 
 /**
  * Compiles a block node into clean semantic HTML5 markup for the web reader.
  */
+function escapeHtmlText(t: string): string {
+  return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 export function renderWebNode(node: ParsedBlockNode): string {
   const p = node.props;
 
@@ -14,11 +28,18 @@ export function renderWebNode(node: ParsedBlockNode): string {
       const align = p.textAlign || 'left';
       const family = p.fontFamily || 'sans';
       const remSize = p.remSize || '';
-      const text = p.htmlContent || p.text || '';
+      const rawText = p.htmlContent || p.text || '';
+      const text = renderMathInHtml(rawText, 'htmlAndMathml');
+      const mathLink = htmlHasMath(rawText) ? MATH_CSS_LINK : '';
       const dropCap = p.dropCap && variant === 'body';
       const keepTogether = p.keepTogetherOnPageTurn ? 'page-break-inside-avoid' : '';
 
+      const googleFont: string = typeof p.googleFont === 'string' ? p.googleFont.trim() : '';
+      const fontLink =
+        (googleFont ? `<link rel="stylesheet" href="${googleFontsHref([googleFont])}">` : '') + mathLink;
+
       const styleAttr = [
+        googleFont ? `font-family: ${googleFontStack(googleFont).replace(/"/g, "'")};` : '',
         remSize ? `font-size: ${remSize};` : '',
         p.lineHeight ? `line-height: ${p.lineHeight};` : '',
         p.letterSpacing ? `letter-spacing: ${p.letterSpacing};` : '',
@@ -30,18 +51,18 @@ export function renderWebNode(node: ParsedBlockNode): string {
 
       switch (variant) {
         case 'h1':
-          return `<h1 class="editorial-h1 ${fontClass} text-${align} ${keepTogether}" style="${styleAttr}">${text}</h1>`;
+          return `${fontLink}<h1 class="editorial-h1 ${fontClass} text-${align} ${keepTogether}" style="${styleAttr}">${text}</h1>`;
         case 'h2':
-          return `<h2 class="editorial-h2 ${fontClass} text-${align} ${keepTogether}" style="${styleAttr}">${text}</h2>`;
+          return `${fontLink}<h2 class="editorial-h2 ${fontClass} text-${align} ${keepTogether}" style="${styleAttr}">${text}</h2>`;
         case 'h3':
-          return `<h3 class="editorial-h3 ${fontClass} text-${align} ${keepTogether}" style="${styleAttr}">${text}</h3>`;
+          return `${fontLink}<h3 class="editorial-h3 ${fontClass} text-${align} ${keepTogether}" style="${styleAttr}">${text}</h3>`;
         case 'lead':
-          return `<p class="editorial-lead ${fontClass} text-${align} ${keepTogether}" style="${styleAttr}">${text}</p>`;
+          return `${fontLink}<p class="editorial-lead ${fontClass} text-${align} ${keepTogether}" style="${styleAttr}">${text}</p>`;
         case 'pullquote':
-          return `<blockquote class="editorial-pullquote ${fontClass} text-${align} ${keepTogether}" style="${styleAttr}"><p>${text}</p></blockquote>`;
+          return `${fontLink}<blockquote class="editorial-pullquote ${fontClass} text-${align} ${keepTogether}" style="${styleAttr}"><p>${text}</p></blockquote>`;
         case 'body':
         default:
-          return `<p class="editorial-body ${fontClass} ${dropCapClass} text-${align} ${keepTogether}" style="${styleAttr}">${text}</p>`;
+          return `${fontLink}<p class="editorial-body ${fontClass} ${dropCapClass} text-${align} ${keepTogether}" style="${styleAttr}">${text}</p>`;
       }
     }
 
@@ -113,8 +134,21 @@ export function renderWebNode(node: ParsedBlockNode): string {
         )
         .join('\n          ');
 
+      // Free-form (dragged) column widths & height override the preset ratio
+      const nativeCols = ratio === 'bento-2x2' ? 2 : cellCount;
+      const widths: number[] = Array.isArray(p.columnWidths) ? p.columnWidths : [];
+      const hasCustomWidths =
+        widths.length === nativeCols && widths.every((w) => typeof w === 'number' && w > 0);
+      const styleParts: string[] = [];
+      if (hasCustomWidths) styleParts.push(`--split-cols: ${widths.map((w) => `${w}fr`).join(' ')}`);
+      if (typeof p.minHeight === 'number' && p.minHeight > 0) {
+        styleParts.push(`--split-min-h: ${Math.round(p.minHeight)}px`);
+      }
+      const styleAttr = styleParts.length ? ` style="${styleParts.join('; ')}"` : '';
+      const customClass = hasCustomWidths ? 'split-custom' : '';
+
       return `
-        <div class="adaptive-split-container split-ratio-${ratio.replace(/\//g, '-')} gap-${gap} ${divider} ${reverse}">
+        <div class="adaptive-split-container split-ratio-${ratio.replace(/\//g, '-')} ${customClass} gap-${gap} ${divider} ${reverse}"${styleAttr}>
           ${colsHtml}
         </div>
       `;
@@ -124,7 +158,7 @@ export function renderWebNode(node: ParsedBlockNode): string {
     case 'CalloutCard': {
       const accent = p.accent || 'yellow';
       const title = p.title || '';
-      const content = p.content || '';
+      const content = withMath(p.content || '');
       return `
         <aside class="editorial-callout accent-${accent}">
           <div class="callout-header"><span class="callout-title">${title}</span></div>
@@ -144,7 +178,7 @@ export function renderWebNode(node: ParsedBlockNode): string {
     case 'InteractiveAccordion': {
       const title = p.title || '';
       const badge = p.badge || '';
-      const content = p.content || '';
+      const content = withMath(p.content || '');
       const accent = p.accent || 'yellow';
       const open = p.defaultOpen ? 'open' : '';
 
@@ -228,6 +262,49 @@ export function renderWebNode(node: ParsedBlockNode): string {
       `;
     }
 
+    case 'TableBlock':
+    case 'Table': {
+      const grid: string[][] = (Array.isArray(p.rows) && p.rows.length ? p.rows : [['']]).map((r: any) =>
+        Array.isArray(r) ? r.map((c: any) => String(c ?? '')) : []
+      );
+      const cols = Math.max(1, ...grid.map((r) => r.length));
+      const headerRow = p.headerRow !== false;
+      const headerColumn = !!p.headerColumn;
+      const aligns: string[] = Array.isArray(p.columnAlign) ? p.columnAlign : [];
+      const widths: number[] | null =
+        Array.isArray(p.columnWidths) && p.columnWidths.length === cols && p.columnWidths.every((w: number) => w > 0)
+          ? p.columnWidths
+          : null;
+      const anyMath = grid.some((r) => r.some((c) => hasMath(c)));
+      const cell = (value: string) => renderMathInText(value, 'htmlAndMathml');
+
+      const colgroup = widths
+        ? `<colgroup>${widths.map((w) => `<col style="width:${w}%">`).join('')}</colgroup>`
+        : '';
+      const body = grid
+        .map((row, r) => {
+          const cells = Array.from({ length: cols }, (_, c) => {
+            const isHead = (headerRow && r === 0) || (headerColumn && c === 0);
+            const tag = isHead ? 'th' : 'td';
+            const scope = isHead ? (headerRow && r === 0 ? ' scope="col"' : ' scope="row"') : '';
+            const align = aligns[c] && aligns[c] !== 'left' ? ` style="text-align:${aligns[c]}"` : '';
+            return `<${tag}${scope}${align}>${cell(row[c] || '')}</${tag}>`;
+          }).join('');
+          return `<tr>${cells}</tr>`;
+        })
+        .join('\n');
+      const caption = p.caption ? `<figcaption class="editorial-caption">${escapeHtmlText(String(p.caption))}</figcaption>` : '';
+      const keep = p.keepTogetherOnPageTurn !== false ? 'page-break-inside-avoid' : '';
+
+      return `
+        ${anyMath ? MATH_CSS_LINK : ''}
+        <figure class="editorial-table-figure ${keep}">
+          <div class="table-scroll"><table class="editorial-table${p.striped ? ' striped' : ''}">${colgroup}<tbody>${body}</tbody></table></div>
+          ${caption}
+        </figure>
+      `;
+    }
+
     case 'AudioNarrationBlock':
     case 'AudioNarration': {
       const src = p.audioSrc || '';
@@ -258,7 +335,8 @@ export function renderWebNode(node: ParsedBlockNode): string {
 
     case 'FreeformCanvasBlock':
     case 'FreeformCanvas': {
-      const ratio = p.aspectRatio || '16/9';
+      const boardHRatio = getArtboardHeightRatio(p.aspectRatio || '16/9', p.artboardHeight);
+      const boardWidthPct = getArtboardWidthPct(p.artboardWidth);
       const bgType = p.backgroundType || 'solid';
       const bg = p.backgroundColor || '#F4F1EA';
       const caption = p.caption || '';
@@ -344,10 +422,10 @@ export function renderWebNode(node: ParsedBlockNode): string {
         .join('\n          ');
 
       return `
-        <figure class="editorial-image-figure">
-          <div class="image-aspect-wrapper aspect-${ratio.replace('/', '-')} ${
+        <figure class="editorial-image-figure" style="width:${boardWidthPct}%;margin-left:auto;margin-right:auto;">
+          <div class="image-aspect-wrapper ${
         bgType === 'transparent' ? '' : 'image-frame-neo'
-      }" style="${artboardBgCss}position:relative;overflow:hidden;">
+      }" style="${artboardBgCss}aspect-ratio:1 / ${boardHRatio};position:relative;overflow:hidden;">
             ${layersHtml}
           </div>
           ${caption ? `<figcaption class="editorial-caption">${caption}</figcaption>` : ''}
@@ -363,7 +441,7 @@ export function renderWebNode(node: ParsedBlockNode): string {
 /**
  * Returns complete, self-contained CSS rules for the web publication.
  */
-export function getWebPublicationStyles(): string {
+function getWyzardWebStyles(): string {
   return `
 /* Base & Typography */
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -476,8 +554,26 @@ body {
   .split-ratio-25-25-50 { grid-template-columns: 1fr 1fr 2fr; }
   .split-ratio-25-25-25-25 { grid-template-columns: repeat(4, 1fr); }
   .split-ratio-bento-2x2 { grid-template-columns: 1fr 1fr; }
+  .adaptive-split-container.split-custom { grid-template-columns: var(--split-cols); }
+  .adaptive-split-container { min-height: var(--split-min-h, 0); }
 }
 .split-column { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+
+/* Links in text */
+.editorial-body a, .editorial-lead a, .editorial-h1 a, .editorial-h2 a, .editorial-h3 a, .editorial-pullquote a {
+  color: #1D4ED8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Table */
+.editorial-table-figure { margin: 2rem 0; }
+.table-scroll { overflow-x: auto; }
+.editorial-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.editorial-table th, .editorial-table td { border: 1px solid rgba(20,20,20,0.35); padding: 0.5rem 0.65rem; text-align: left; vertical-align: top; }
+.editorial-table th { background: rgba(20,20,20,0.06); font-weight: 700; }
+.editorial-table.striped tbody tr:nth-child(even) td { background: rgba(20,20,20,0.035); }
+.editorial-table-figure .katex { font-size: 1.05em; }
 
 /* Callout Box */
 .editorial-callout {
@@ -761,6 +857,58 @@ document.addEventListener('DOMContentLoaded', function() {
 /**
  * Compiles the entire project into a standalone single-file Web Publication bundle.
  */
+/**
+ * Unthemed override layer for the "plain" canvas design system. Appended after the
+ * Wyzard editorial rules so Web / PDF exports match the blank, neutral editor canvas.
+ */
+export function getPlainWebOverrides(): string {
+  return `
+/* ===== Plain design system overrides ===== */
+body { font-family: Arial, Helvetica, sans-serif; color: #111111; background-color: #FFFFFF; }
+.book-wrapper { box-shadow: none; }
+.editorial-h1, .editorial-h2, .editorial-h3, .editorial-pullquote,
+.popover-header, .slide-title, .slide-caption, .player-title, .accordion-title {
+  font-family: Arial, Helvetica, sans-serif;
+}
+.editorial-caption, .player-narrator, .player-duration, .callout-title, .accordion-badge,
+.hotspot-pin, .editorial-ornament, .hero-kicker, .hero-author {
+  font-family: Arial, Helvetica, sans-serif;
+}
+.editorial-lead, .editorial-body { color: #111111; }
+.editorial-pullquote { border-left: 3px solid #D1D5DB; }
+.drop-cap-enabled::first-letter { font-family: inherit; color: inherit; }
+.image-frame-neo { border: 1px solid #D1D5DB; box-shadow: none; }
+.image-aspect-wrapper { border-radius: 0; background: #F3F4F6; }
+.editorial-hero-spread { border-radius: 0; }
+.card-neo-white, .card-glass-dark { border: 1px solid #D1D5DB; box-shadow: none; border-radius: 0; }
+.editorial-callout { border: 1px solid #D1D5DB; border-radius: 2px; box-shadow: none; }
+.accent-yellow, .accent-vermilion, .accent-teal, .accent-violet { background-color: #F3F4F6; border-color: #D1D5DB; }
+.interactive-accordion { border: 1px solid #D1D5DB; border-radius: 2px; box-shadow: none; }
+.accordion-badge { background: #F3F4F6; border: 1px solid #D1D5DB; }
+.accordion-drawer { border-top: 1px solid #D1D5DB; background: #FFFFFF; }
+.pinboard-canvas-wrapper { border: 1px solid #D1D5DB; border-radius: 2px; box-shadow: none; }
+.hotspot-pin { border: 1px solid #111111; background: #FFFFFF; color: #111111; box-shadow: none; }
+.hotspot-pin:hover { background: #111111; color: #FFFFFF; }
+.gallery-carousel-track { border: 1px solid #D1D5DB; border-radius: 2px; box-shadow: none; }
+.gallery-prev-btn, .gallery-next-btn { box-shadow: none; border-color: #D1D5DB; }
+.gallery-dots .dot.active { background: #111111; }
+.editorial-audio-player { box-shadow: none; border-color: #D1D5DB; border-radius: 2px; }
+.player-cover, .player-progress-bar { border-color: #D1D5DB; }
+.player-play-btn { box-shadow: none; }
+.progress-fill { background: #111111; }
+`;
+}
+
+/**
+ * Returns the stylesheet for the given canvas design system. Defaults to the Wyzard
+ * editorial look (legacy projects have no design system set).
+ */
+export function getWebPublicationStyles(designSystem?: CanvasDesignSystem): string {
+  return designSystem === 'plain'
+    ? getWyzardWebStyles() + getPlainWebOverrides()
+    : getWyzardWebStyles();
+}
+
 export function compileWebPublication(project: BookProject, currentChapterId?: string): string {
   const activeChapterId = currentChapterId || project.activeChapterId;
   const chapter = project.chapters.find((c) => c.id === activeChapterId) || project.chapters[0];
@@ -809,7 +957,7 @@ export function compileWebPublication(project: BookProject, currentChapterId?: s
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
   <style>
-    ${getWebPublicationStyles()}
+    ${getWebPublicationStyles(project.designSystem)}
   </style>
 </head>
 <body>

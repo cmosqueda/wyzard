@@ -1,8 +1,20 @@
-import React, { useState, useRef } from 'react';
-import { useNode, type UserComponent } from '@craftjs/core';
+import React, { useState, useRef, useEffect } from 'react';
+import { useNode, useEditor, type UserComponent } from '@craftjs/core';
 import { saveAsset } from '../../db/assets';
 import { useEditorStore } from '../../store/editorStore';
 import { notify } from '../../store/toastStore';
+import { PopoverMenu } from '../ui/PopoverMenu';
+import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
+import { useCanvasHistory } from '../editor/useCanvasHistory';
+import { StageDockPortal } from '../editor/centerStage/StageDock';
+import { LAYER_MIME, isModalOpen, isTypingTarget } from '../editor/blockClipboard';
+import {
+  getArtboardHeightRatio,
+  getArtboardWidthPct,
+  MIN_ARTBOARD_HEIGHT_RATIO,
+  MAX_ARTBOARD_HEIGHT_RATIO,
+  MIN_ARTBOARD_WIDTH_PCT,
+} from '../../utils/artboard';
 import {
   setAssetDragData,
   getAssetDragData,
@@ -51,6 +63,11 @@ import {
   Grid,
   Loader2,
   GripVertical,
+  Plus,
+  MoreHorizontal,
+  Undo2,
+  Redo2,
+  X,
 } from 'lucide-react';
 
 export type LayerShapeKind = 'rect' | 'circle' | 'pill' | 'star' | 'hexagon' | 'diamond';
@@ -100,6 +117,10 @@ export interface CanvasLayerItem {
 
 export interface FreeformCanvasBlockProps {
   aspectRatio?: '16/9' | '4/3' | '1/1' | '4/5';
+  /** Free-form artboard height ÷ width (set by dragging the bottom edge). Overrides the preset. */
+  artboardHeight?: number;
+  /** Free-form artboard width in % of the page column (set by dragging the right edge). */
+  artboardWidth?: number;
   backgroundType?: ArtboardBgType;
   backgroundColor?: string;
   backgroundGradient?: string;
@@ -114,24 +135,7 @@ export interface FreeformCanvasBlockProps {
   keepTogetherOnPageTurn?: boolean;
 }
 
-/**
- * Returns height-to-width ratio (H / W) for a given artboard aspectRatio preset.
- */
-export function getArtboardHeightRatio(
-  ratio: FreeformCanvasBlockProps['aspectRatio'] = '16/9'
-): number {
-  switch (ratio) {
-    case '1/1':
-      return 1;
-    case '4/5':
-      return 5 / 4; // 1.25
-    case '4/3':
-      return 3 / 4; // 0.75
-    case '16/9':
-    default:
-      return 9 / 16; // 0.5625
-  }
-}
+export { getArtboardHeightRatio };
 
 export const GRADIENT_PRESETS: { label: string; value: string }[] = [
   {
@@ -435,8 +439,24 @@ export function getArtboardBackgroundStyle(
   };
 }
 
+
+/** Scale layers vertically when the artboard height ratio changes so shapes keep their pixel proportions. */
+function scaleLayersForHeight(list: CanvasLayerItem[], from: number, to: number): CanvasLayerItem[] {
+  if (!from || !to || from === to) return list;
+  const k = from / to;
+  return list.map((l) => ({
+    ...l,
+    y: Number(Math.max(0, Math.min(95, l.y * k)).toFixed(2)),
+    height: Number(Math.max(2, Math.min(100, l.height * k)).toFixed(2)),
+  }));
+}
+
+const FcMenu = PopoverMenu;
+
 export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
   aspectRatio = '16/9',
+  artboardHeight,
+  artboardWidth,
   backgroundType = 'solid',
   backgroundColor = '#F4F1EA',
   backgroundGradient = GRADIENT_PRESETS[0].value,
@@ -447,7 +467,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
   snapToGuides = true,
   scaleTextOnResize = true,
   caption = 'Fig. — Vector & visual artboard (inspired by Graphite Editor • Web & EPUB 3 SVG)',
-  layers = DEFAULT_LAYERS,
+  layers: storedLayers = DEFAULT_LAYERS,
   keepTogetherOnPageTurn = true,
 }) => {
   const {
@@ -455,13 +475,63 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
     selected,
     hovered,
     actions: { setProp },
+    nodeId,
   } = useNode((node) => ({
     selected: node.events.selected,
     hovered: node.events.hovered,
+    nodeId: node.id,
   }));
 
   const projectId = useEditorStore((s) => s.project.id);
   const addAssetAttribution = useEditorStore((s) => s.addAssetAttribution);
+
+  // Undo / redo (Craft-backed) and gesture-merged edits: a whole drag / resize / rotate becomes ONE undo step
+  const { actions: editorActions, otherSelected } = useEditor((state) => ({
+    otherSelected: state.events.selected.size > 0 && !state.events.selected.has(nodeId),
+  }));
+
+  // The canvas tools live in stage docks outside the device frame. They open when this canvas is
+  // entered (selected) and close on Done / Escape or when another block is selected.
+  const [isDockOpen, setIsDockOpen] = useState(false);
+  useEffect(() => {
+    if (selected) setIsDockOpen(true);
+  }, [selected]);
+  useEffect(() => {
+    if (otherSelected) setIsDockOpen(false);
+  }, [otherSelected]);
+  useEffect(() => {
+    if (!isDockOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || isTypingTarget(e.target) || document.querySelector('[role="menu"]')) return;
+      setIsDockOpen(false);
+      setSelectedIds([]);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isDockOpen]);
+  const { undo, redo, canUndo, canRedo } = useCanvasHistory();
+  const gestureRef = useRef(false);
+  const setPropGesture = (cb: (props: FreeformCanvasBlockProps) => void) => {
+    if (gestureRef.current) {
+      editorActions.history.merge().setProp(nodeId, cb as any);
+    } else {
+      setProp(cb);
+      gestureRef.current = true;
+    }
+  };
+
+  // Free-form artboard sizing: live values while an edge is being dragged
+  const [liveHeightRatio, setLiveHeightRatio] = useState<number | null>(null);
+  const [liveWidthPct, setLiveWidthPct] = useState<number | null>(null);
+  const baseHeightRatio = getArtboardHeightRatio(aspectRatio, artboardHeight);
+  const effectiveHeightRatio = liveHeightRatio ?? artboardHeight;
+  const hRatioNow = getArtboardHeightRatio(aspectRatio, effectiveHeightRatio);
+  const widthPctNow = liveWidthPct ?? getArtboardWidthPct(artboardWidth);
+  // While dragging the height edge, layers are scaled live so they keep their proportions
+  const layers =
+    liveHeightRatio !== null
+      ? scaleLayersForHeight(storedLayers, baseHeightRatio, liveHeightRatio)
+      : storedLayers;
 
   const [activeTool, setActiveTool] = useState<ActiveTool>('select');
   // Lock state editing mode: locks the canvas block in place so dragging/long-pressing assets inside never moves the block itself
@@ -484,6 +554,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
   } | null>(null);
 
   // Embedded drawers inside Fixed Visual Canvas: Layer Manager | Background Studio | Asset Packs
+  const [layerMenu, setLayerMenu] = useState<{ x: number; y: number; layerId: string } | null>(null);
   const [openDrawer, setOpenDrawer] = useState<'none' | 'layers' | 'background' | 'packs'>('none');
 
   // Live Iconify Vector Search inside the Artboard Asset Packs Drawer
@@ -542,20 +613,6 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
   const activeLayer = layers.find((l) => l.id === primarySelectedId) || null;
   const selectedLayersList = layers.filter((l) => selectedIds.includes(l.id));
 
-  const getAspectClass = () => {
-    switch (aspectRatio) {
-      case '1/1':
-        return 'aspect-square';
-      case '4/5':
-        return 'aspect-[4/5]';
-      case '4/3':
-        return 'aspect-[4/3]';
-      case '16/9':
-      default:
-        return 'aspect-video';
-    }
-  };
-
   const getRelativeBoardCoords = (clientX: number, clientY: number): VectorPoint => {
     if (!boardRef.current) return { x: 50, y: 50 };
     const rect = boardRef.current.getBoundingClientRect();
@@ -602,7 +659,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
     dropCenter?: { x: number; y: number }
   ) => {
     const id = 'pack-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 5);
-    const hRatio = getArtboardHeightRatio(aspectRatio);
+    const hRatio = getArtboardHeightRatio(aspectRatio, effectiveHeightRatio);
     const w = item.kind === 'iconify' ? 24 : 38;
     const h = Math.min(88, Math.round(w / hRatio));
     const tint = item.defaultColor || '#141414';
@@ -677,7 +734,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
     setDropCursorPct(null);
 
     const dropPos = getRelativeBoardCoords(e.clientX, e.clientY);
-    const hRatio = getArtboardHeightRatio(aspectRatio);
+    const hRatio = getArtboardHeightRatio(aspectRatio, effectiveHeightRatio);
 
     // 1. Check for Wyzard Asset Pack drag payload (from Left Rail AssetLibrary or In-Canvas Packs)
     const assetPayload = getAssetDragData(e);
@@ -838,6 +895,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
 
   // Artboard pointer handlers for Pen, Freehand, and Marquee Multi-Selection
   const handleBoardPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button === 2) return;
     if (activeTool === 'pen') {
       e.stopPropagation();
       const pt = getRelativeBoardCoords(e.clientX, e.clientY);
@@ -940,7 +998,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
       const primaryOrig = st.initialLayers[st.primaryId];
       const deltaAngle = primaryOrig ? angleDeg - primaryOrig.rotation : 0;
 
-      setProp((props: FreeformCanvasBlockProps) => {
+      setPropGesture((props: FreeformCanvasBlockProps) => {
         Object.keys(st.initialLayers).forEach((id) => {
           const item = (props.layers || []).find((l) => l.id === id);
           const init = st.initialLayers[id];
@@ -1003,7 +1061,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
       const snappedDx = nextPrimaryX - primaryInit.x;
       const snappedDy = nextPrimaryY - primaryInit.y;
 
-      setProp((props: FreeformCanvasBlockProps) => {
+      setPropGesture((props: FreeformCanvasBlockProps) => {
         Object.keys(st.initialLayers).forEach((id) => {
           const item = (props.layers || []).find((l) => l.id === id);
           const init = st.initialLayers[id];
@@ -1051,7 +1109,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
       const isCornerResize = st.handle.length === 2;
       const fontScale = isCornerResize ? (scaleFactorW + scaleFactorH) / 2 : scaleFactorH;
 
-      setProp((props: FreeformCanvasBlockProps) => {
+      setPropGesture((props: FreeformCanvasBlockProps) => {
         Object.keys(st.initialLayers).forEach((id) => {
           const item = (props.layers || []).find((l) => l.id === id);
           const init = st.initialLayers[id];
@@ -1080,6 +1138,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
   };
 
   const handleBoardPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    gestureRef.current = false;
     if (activeTool === 'draw' && isDrawingFreehand) {
       e.stopPropagation();
       setIsDrawingFreehand(false);
@@ -1122,6 +1181,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
     e: React.PointerEvent<HTMLDivElement>,
     layer: CanvasLayerItem
   ) => {
+    if (e.button === 2) return;
     if (activeTool !== 'select') return;
     e.stopPropagation();
 
@@ -1194,7 +1254,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
   // Add preset layer (sizing height relative to current aspect ratio so shapes are never stretched)
   const addLayer = (kind: 'text' | 'rect' | 'circle' | 'star' | 'hexagon' | 'image') => {
     const id = 'layer-' + Date.now().toString(36);
-    const hRatio = getArtboardHeightRatio(aspectRatio);
+    const hRatio = getArtboardHeightRatio(aspectRatio, effectiveHeightRatio);
     const squareW = 24;
     const unstretchedH = Math.min(90, Math.round(squareW / hRatio));
 
@@ -1443,14 +1503,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
 
   // Export artboard directly as a standalone .svg vector file
   const handleExportSvgFile = () => {
-    const viewH =
-      aspectRatio === '1/1'
-        ? 1000
-        : aspectRatio === '4/5'
-        ? 1250
-        : aspectRatio === '4/3'
-        ? 750
-        : 562;
+    const viewH = Math.round(1000 * hRatioNow);
 
     const svgBody = layers
       .filter((l) => !l.hidden)
@@ -1576,6 +1629,145 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
     return null;
   };
 
+  // Layer shortcuts while this canvas block is selected: Delete, Ctrl+D, Ctrl+C, Ctrl+V
+  const layerShortcutRef = useRef({
+    selectedIds: [] as string[],
+    layers: [] as CanvasLayerItem[],
+    deleteLayers: () => {},
+    duplicateLayers: () => {},
+    pasteLayers: (_clip: CanvasLayerItem[]) => {},
+  });
+  layerShortcutRef.current = {
+    selectedIds,
+    layers,
+    deleteLayers: deleteSelectedLayers,
+    duplicateLayers: duplicateSelectedLayers,
+    pasteLayers: (clip: CanvasLayerItem[]) => {
+      const ids: string[] = [];
+      setProp((props: FreeformCanvasBlockProps) => {
+        const copies = clip.map((layer) => {
+          const id = 'layer-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+          ids.push(id);
+          return {
+            ...JSON.parse(JSON.stringify(layer)),
+            id,
+            x: Math.min(92, layer.x + 3),
+            y: Math.min(92, layer.y + 3),
+          } as CanvasLayerItem;
+        });
+        props.layers = [...(props.layers || []), ...copies];
+      });
+      setSelectedIds(ids);
+    },
+  };
+
+  useEffect(() => {
+    if (!selected) return;
+    const onKey = (e: KeyboardEvent) => {
+      const cur = layerShortcutRef.current;
+      if (cur.selectedIds.length === 0 || isTypingTarget(e.target) || isModalOpen()) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod && (e.key === 'Delete' || e.key === 'Backspace')) {
+        e.preventDefault();
+        e.stopPropagation();
+        cur.deleteLayers();
+      } else if (mod && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        e.stopPropagation();
+        cur.duplicateLayers();
+      }
+    };
+    const onCopy = (e: ClipboardEvent) => {
+      const cur = layerShortcutRef.current;
+      if (cur.selectedIds.length === 0 || isTypingTarget(e.target) || isModalOpen() || !e.clipboardData) return;
+      const picked = cur.layers.filter((l) => cur.selectedIds.includes(l.id));
+      e.preventDefault();
+      e.stopPropagation();
+      e.clipboardData.setData(LAYER_MIME, JSON.stringify(picked));
+      e.clipboardData.setData('text/plain', picked.map((l) => l.text || l.name || '').filter(Boolean).join('\n'));
+      notify({ type: 'info', title: `Copied ${picked.length} ${picked.length === 1 ? 'layer' : 'layers'}`, duration: 1200 });
+    };
+    const onPaste = (e: ClipboardEvent) => {
+      if (isTypingTarget(e.target) || isModalOpen() || !e.clipboardData) return;
+      const raw = e.clipboardData.getData(LAYER_MIME);
+      if (!raw) return;
+      try {
+        const clip = JSON.parse(raw) as CanvasLayerItem[];
+        if (!Array.isArray(clip) || clip.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        layerShortcutRef.current.pasteLayers(clip);
+      } catch {
+        // not a layer payload
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('copy', onCopy, true);
+    window.addEventListener('paste', onPaste, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('copy', onCopy, true);
+      window.removeEventListener('paste', onPaste, true);
+    };
+  }, [selected]);
+
+  const startArtboardResize = (e: React.PointerEvent<HTMLElement>, axis: 'x' | 'y' | 'xy') => {
+    const board = boardRef.current;
+    const column = board?.parentElement?.parentElement;
+    if (!board || !column || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const target = e.currentTarget;
+    target.setPointerCapture?.(e.pointerId);
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const rect = board.getBoundingClientRect();
+    const colW = Math.max(1, column.getBoundingClientRect().width);
+    const startHeightRatio = hRatioNow;
+    let nextH = startHeightRatio;
+    let nextW = widthPctNow;
+    let moved = false;
+
+    const onMove = (ev: PointerEvent) => {
+      moved = true;
+      if (axis !== 'y') {
+        // The artboard is centred, so each edge moves by half of the width change
+        nextW = Math.min(
+          100,
+          Math.max(MIN_ARTBOARD_WIDTH_PCT, Math.round(((rect.width + (ev.clientX - startX) * 2) / colW) * 1000) / 10)
+        );
+        setLiveWidthPct(nextW);
+      }
+      if (axis !== 'x') {
+        const boardWpx = (rect.width / Math.max(1, widthPctNow)) * nextW;
+        nextH = Math.min(
+          MAX_ARTBOARD_HEIGHT_RATIO,
+          Math.max(MIN_ARTBOARD_HEIGHT_RATIO, Math.round(((rect.height + (ev.clientY - startY)) / Math.max(1, boardWpx)) * 1000) / 1000)
+        );
+        setLiveHeightRatio(nextH);
+      }
+    };
+    const onUp = () => {
+      target.removeEventListener('pointermove', onMove as EventListener);
+      target.removeEventListener('pointerup', onUp);
+      target.removeEventListener('pointercancel', onUp);
+      setLiveHeightRatio(null);
+      setLiveWidthPct(null);
+      if (!moved) return;
+      setProp((p: FreeformCanvasBlockProps) => {
+        if (axis !== 'x' && nextH !== startHeightRatio) {
+          p.layers = scaleLayersForHeight(p.layers || storedLayers, startHeightRatio, nextH);
+          p.artboardHeight = nextH;
+        }
+        if (axis !== 'y') p.artboardWidth = nextW;
+      });
+    };
+    target.addEventListener('pointermove', onMove as EventListener);
+    target.addEventListener('pointerup', onUp);
+    target.addEventListener('pointercancel', onUp);
+  };
+
   const artboardBgStyle = getArtboardBackgroundStyle(
     {
       backgroundType,
@@ -1603,36 +1795,27 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
           : ''
       }`}
     >
-      {/* Top Vector & Artboard Studio Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2 bg-neo-ink text-white px-2.5 py-2 rounded-lg border-neo border-neo-ink shadow-neo-sm text-[10px] font-mono">
-        {/* Lock Canvas Editing State + Tool Modes: Select | Pen | Freehand Brush */}
-        <div className="flex flex-wrap items-center gap-1">
-          {/* Canvas Edit Lock Toggle (Prevents dragging assets inside from moving the whole canvas block!) */}
+      {isDockOpen && (
+        <StageDockPortal slot="top">
+      {/* Top toolbar: tools on the left, add / panels on the right */}
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-neo-ink text-white px-2.5 py-1.5 rounded-lg border-neo border-neo-ink shadow-neo-sm text-[11px] font-mono">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* Edit lock: keeps drags inside the artboard from moving the block */}
           <button
             type="button"
             onClick={() => setIsCanvasEditingLocked((prev) => !prev)}
-            className={`px-2 py-1 rounded flex items-center gap-1 font-bold transition-colors border ${
+            className={`p-1.5 rounded flex items-center gap-1 font-bold transition-colors ${
               isCanvasEditingLocked
-                ? 'bg-neo-teal text-neo-ink border-neo-teal'
-                : 'bg-neo-vermilion text-white border-white/40'
+                ? 'bg-white/10 hover:bg-white/20'
+                : 'bg-neo-vermilion text-white'
             }`}
             title={
               isCanvasEditingLocked
-                ? 'Canvas Edit Locked: Long-pressing and dragging assets inside stays strictly inside this canvas. Click to unlock block reordering.'
-                : 'Block Move Unlocked: Use the Move Block grip to reorder this canvas block on the page. Click to lock for canvas editing.'
+                ? 'Locked: dragging inside the canvas edits layers only. Click to unlock moving this block.'
+                : 'Unlocked: drag the grip to move this block on the page. Click to lock again.'
             }
           >
-            {isCanvasEditingLocked ? (
-              <>
-                <Lock className="w-3 h-3" />
-                <span>Edit Locked</span>
-              </>
-            ) : (
-              <>
-                <Unlock className="w-3 h-3" />
-                <span>Unlocked</span>
-              </>
-            )}
+            {isCanvasEditingLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
           </button>
 
           {!isCanvasEditingLocked && (
@@ -1640,138 +1823,124 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
               ref={(ref) => {
                 if (ref) drag(ref);
               }}
-              className="px-2 py-1 rounded bg-neo-yellow text-neo-ink font-bold flex items-center gap-1 cursor-grab active:cursor-grabbing"
-              title="Drag here to move this Fixed Visual Canvas block up/down between other page blocks"
+              className="p-1.5 rounded bg-neo-yellow text-neo-ink font-bold flex items-center gap-1 cursor-grab active:cursor-grabbing"
+              title="Drag to move this canvas block between other page blocks"
             >
-              <GripVertical className="w-3 h-3" />
-              <span>Move Block</span>
+              <GripVertical className="w-3.5 h-3.5" />
             </span>
           )}
 
-          <div className="h-4 w-[1px] bg-white/20 mx-0.5" />
+          <div className="h-4 w-[1px] bg-white/20" />
 
-          <button
-            type="button"
-            onClick={() => {
-              if (draftPoints.length >= 2) commitDraftVector(draftPoints, false, true);
-              setActiveTool('select');
-            }}
-            className={`px-2 py-1 rounded flex items-center gap-1 font-bold transition-colors ${
-              activeTool === 'select'
-                ? 'bg-neo-yellow text-neo-ink'
-                : 'bg-white/10 hover:bg-white/20'
-            }`}
-            title="Select, Multi-Select (Shift+Click or Drag Box), Resize & Rotate"
-          >
-            <MousePointer className="w-3 h-3" />
-            <span>Select</span>
-          </button>
+          {/* Tool selector */}
+          <div className="flex items-center bg-white/10 rounded p-0.5 gap-0.5">
+            {(
+              [
+                { id: 'select', icon: <MousePointer className="w-3.5 h-3.5" />, label: 'Select', hint: 'Select, multi-select (Shift+Click or drag a box), resize & rotate' },
+                { id: 'pen', icon: <PenTool className="w-3.5 h-3.5" />, label: 'Pen', hint: 'Pen: click points to draw a vector shape' },
+                { id: 'draw', icon: <Brush className="w-3.5 h-3.5" />, label: 'Draw', hint: 'Brush: drag to sketch a free path' },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                title={t.hint}
+                onClick={() => {
+                  if (t.id === 'select') {
+                    if (draftPoints.length >= 2) commitDraftVector(draftPoints, false, true);
+                    setActiveTool('select');
+                  } else {
+                    setActiveTool(t.id);
+                    setDraftPoints([]);
+                  }
+                }}
+                className={`px-2 py-1 rounded flex items-center gap-1 font-bold transition-colors ${
+                  activeTool === t.id ? 'bg-neo-yellow text-neo-ink' : 'hover:bg-white/15'
+                }`}
+              >
+                {t.icon}
+                <span className="hidden sm:inline">{t.label}</span>
+              </button>
+            ))}
+          </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTool('pen');
-              setDraftPoints([]);
-            }}
-            className={`px-2 py-1 rounded flex items-center gap-1 font-bold transition-colors ${
-              activeTool === 'pen'
-                ? 'bg-neo-vermilion text-white'
-                : 'bg-white/10 hover:bg-white/20'
-            }`}
-            title="Vector Pen Tool: click points on canvas to draw custom SVG curves/shapes"
-          >
-            <PenTool className="w-3 h-3" />
-            <span>Pen</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTool('draw');
-              setDraftPoints([]);
-            }}
-            className={`px-2 py-1 rounded flex items-center gap-1 font-bold transition-colors ${
-              activeTool === 'draw'
-                ? 'bg-neo-teal text-neo-ink'
-                : 'bg-white/10 hover:bg-white/20'
-            }`}
-            title="Vector Brush Tool: drag freely on canvas to sketch smooth SVG paths"
-          >
-            <Brush className="w-3 h-3" />
-            <span>Draw</span>
-          </button>
+          <div className="flex items-center bg-white/10 rounded p-0.5 gap-0.5">
+            <button
+              type="button"
+              onClick={undo}
+              disabled={!canUndo}
+              title="Undo (Ctrl+Z)"
+              className="p-1 rounded hover:bg-white/20 disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={redo}
+              disabled={!canRedo}
+              title="Redo (Ctrl+Shift+Z)"
+              className="p-1 rounded hover:bg-white/20 disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              <Redo2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
 
           {activeTool === 'pen' && draftPoints.length > 0 && (
-            <div className="flex items-center gap-1 ml-1">
+            <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => commitDraftVector(draftPoints, false, true)}
-                className="px-2 py-0.5 bg-neo-teal text-neo-ink rounded font-bold"
+                className="px-2 py-1 bg-neo-teal text-neo-ink rounded font-bold"
               >
-                Finish Open ({draftPoints.length})
+                Finish ({draftPoints.length})
               </button>
               <button
                 type="button"
                 onClick={() => commitDraftVector(draftPoints, true, true)}
-                className="px-2 py-0.5 bg-neo-yellow text-neo-ink rounded font-bold"
+                className="px-2 py-1 bg-neo-yellow text-neo-ink rounded font-bold"
               >
-                Close Shape
+                Close shape
               </button>
             </div>
           )}
         </div>
 
-        {/* Add Primitives + Open Drawers (Asset Packs, Layers, Background) */}
-        <div className="flex flex-wrap items-center gap-1">
-          <button
-            type="button"
-            onClick={() => addLayer('text')}
-            className="px-2 py-1 bg-white/15 hover:bg-neo-yellow hover:text-neo-ink rounded flex items-center gap-1 font-bold transition-colors"
-            title="Add resizable text layer"
+        <div className="flex flex-wrap items-center gap-1.5">
+          <FcMenu
+            title="Add a layer"
+            label="Add"
+            align="right"
+            buttonClassName="bg-neo-yellow text-neo-ink hover:brightness-95"
+            icon={<Plus className="w-3.5 h-3.5" strokeWidth={3} />}
           >
-            <Type className="w-3 h-3" />
-            <span>Text</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => addLayer('rect')}
-            className="p-1 bg-white/15 hover:bg-neo-yellow hover:text-neo-ink rounded"
-            title="Add rectangle"
-          >
-            <Square className="w-3 h-3" />
-          </button>
-          <button
-            type="button"
-            onClick={() => addLayer('circle')}
-            className="p-1 bg-white/15 hover:bg-neo-yellow hover:text-neo-ink rounded"
-            title="Add circle"
-          >
-            <Circle className="w-3 h-3" />
-          </button>
-          <button
-            type="button"
-            onClick={() => addLayer('star')}
-            className="p-1 bg-white/15 hover:bg-neo-yellow hover:text-neo-ink rounded"
-            title="Add vector star"
-          >
-            <Star className="w-3 h-3" />
-          </button>
-          <button
-            type="button"
-            onClick={() => addLayer('hexagon')}
-            className="p-1 bg-white/15 hover:bg-neo-yellow hover:text-neo-ink rounded"
-            title="Add vector polygon"
-          >
-            <Hexagon className="w-3 h-3" />
-          </button>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="p-1 bg-white/15 hover:bg-neo-teal hover:text-neo-ink rounded"
-            title="Upload local SVG/PNG into artboard"
-          >
-            <Upload className="w-3 h-3" />
-          </button>
+            {(close) => (
+              <div className="flex flex-col min-w-[150px] text-neo-ink">
+                {(
+                  [
+                    { label: 'Text', icon: <Type className="w-3.5 h-3.5" />, run: () => addLayer('text') },
+                    { label: 'Rectangle', icon: <Square className="w-3.5 h-3.5" />, run: () => addLayer('rect') },
+                    { label: 'Circle', icon: <Circle className="w-3.5 h-3.5" />, run: () => addLayer('circle') },
+                    { label: 'Star', icon: <Star className="w-3.5 h-3.5" />, run: () => addLayer('star') },
+                    { label: 'Hexagon', icon: <Hexagon className="w-3.5 h-3.5" />, run: () => addLayer('hexagon') },
+                    { label: 'Upload image / SVG', icon: <Upload className="w-3.5 h-3.5" />, run: () => fileInputRef.current?.click() },
+                  ] as const
+                ).map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => {
+                      item.run();
+                      close();
+                    }}
+                    className="flex items-center gap-2 px-2.5 py-1.5 rounded text-left hover:bg-neo-yellow/50"
+                  >
+                    {item.icon}
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </FcMenu>
           <input
             ref={fileInputRef}
             type="file"
@@ -1780,63 +1949,68 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
             className="hidden"
           />
 
-          {/* Asset Packs Drawer Toggle */}
-          <button
-            type="button"
-            onClick={() => setOpenDrawer((d) => (d === 'packs' ? 'none' : 'packs'))}
-            className={`px-2 py-1 rounded flex items-center gap-1 font-bold transition-colors ${
-              openDrawer === 'packs'
-                ? 'bg-neo-vermilion text-white'
-                : 'bg-white/15 hover:bg-neo-yellow hover:text-neo-ink'
-            }`}
-            title="Browse & Insert Editable Asset Packs & Vectors inside Canvas"
-          >
-            <PackageOpen className="w-3 h-3" />
-            <span>Asset Packs</span>
-          </button>
+          {(
+            [
+              { id: 'packs', label: 'Assets', icon: <PackageOpen className="w-3.5 h-3.5" />, hint: 'Browse editable asset packs & vectors' },
+              { id: 'background', label: 'Background', icon: <Grid className="w-3.5 h-3.5" />, hint: 'Background: transparent, solid, gradient, pattern or image' },
+              { id: 'layers', label: `Layers · ${layers.length}`, icon: <Layers className="w-3.5 h-3.5" />, hint: 'Layer list & multi-selection manager' },
+            ] as const
+          ).map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              title={d.hint}
+              onClick={() => setOpenDrawer((cur) => (cur === d.id ? 'none' : d.id))}
+              className={`px-2 py-1.5 rounded flex items-center gap-1 font-bold transition-colors ${
+                openDrawer === d.id ? 'bg-neo-yellow text-neo-ink' : 'bg-white/10 hover:bg-white/20'
+              }`}
+            >
+              {d.icon}
+              <span className="hidden md:inline">{d.label}</span>
+            </button>
+          ))}
 
-          {/* Background Studio Drawer Toggle */}
-          <button
-            type="button"
-            onClick={() => setOpenDrawer((d) => (d === 'background' ? 'none' : 'background'))}
-            className={`px-2 py-1 rounded flex items-center gap-1 font-bold transition-colors ${
-              openDrawer === 'background'
-                ? 'bg-neo-teal text-neo-ink'
-                : 'bg-white/15 hover:bg-neo-yellow hover:text-neo-ink'
-            }`}
-            title="Background Settings (Transparent, Solid, Gradient, Pattern, Image)"
+          <FcMenu
+            title="More"
+            align="right"
+            buttonClassName="bg-white/10 hover:bg-white/20"
+            icon={<MoreHorizontal className="w-3.5 h-3.5" />}
           >
-            <Grid className="w-3 h-3" />
-            <span>Bg</span>
-          </button>
-
-          {/* Enhanced Layering Manager Toggle */}
-          <button
-            type="button"
-            onClick={() => setOpenDrawer((d) => (d === 'layers' ? 'none' : 'layers'))}
-            className={`px-2 py-1 rounded flex items-center gap-1 font-bold transition-colors ${
-              openDrawer === 'layers'
-                ? 'bg-neo-yellow text-neo-ink'
-                : 'bg-white/15 hover:bg-neo-yellow hover:text-neo-ink'
-            }`}
-            title="Enhanced Layering & Multi-Selection Manager"
-          >
-            <Layers className="w-3 h-3" />
-            <span>Layers ({layers.length})</span>
-          </button>
+            {(close) => (
+              <button
+                type="button"
+                onClick={() => {
+                  handleExportSvgFile();
+                  close();
+                }}
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded text-left text-neo-ink hover:bg-neo-yellow/50 whitespace-nowrap"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export artboard as SVG
+              </button>
+            )}
+          </FcMenu>
 
           <button
             type="button"
-            onClick={handleExportSvgFile}
-            className="px-2 py-1 bg-neo-teal text-neo-ink rounded flex items-center gap-1 font-bold"
-            title="Export Artboard as standalone SVG file"
+            onClick={() => {
+              setIsDockOpen(false);
+              setSelectedIds([]);
+            }}
+            title="Done editing this canvas (Esc)"
+            className="px-2 py-1.5 rounded flex items-center gap-1 font-bold bg-neo-vermilion text-white hover:brightness-110"
           >
-            <Download className="w-3 h-3" />
-            <span>SVG</span>
+            <X className="w-3.5 h-3.5" strokeWidth={3} />
+            <span className="hidden sm:inline">Done</span>
           </button>
         </div>
       </div>
 
+        </StageDockPortal>
+      )}
+
+      {isDockOpen && (
+        <StageDockPortal slot="drawer">
       {/* DRAWER 1: ASSET PACKS & EDITABLE VECTORS BROWSER INSIDE CANVAS */}
       {openDrawer === 'packs' && (
         <div
@@ -2370,9 +2544,16 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
         </div>
       )}
 
+        </StageDockPortal>
+      )}
+
       {/* Fixed Aspect-Ratio 2D Vector & Visual Artboard (Also a Drag-and-Drop Asset Target!) */}
+      <div className="relative mx-auto" style={{ width: `${widthPctNow}%` }}>
       <div
         ref={boardRef}
+        onPointerDownCapture={() => {
+          gestureRef.current = false;
+        }}
         onPointerDown={handleBoardPointerDown}
         onPointerMove={handleBoardPointerMove}
         onPointerUp={handleBoardPointerUp}
@@ -2390,8 +2571,8 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
         onDragEnter={handleBoardDragOver}
         onDragLeave={handleBoardDragLeave}
         onDrop={handleBoardDrop}
-        style={{ ...artboardBgStyle, touchAction: 'none' }}
-        className={`w-full ${getAspectClass()} relative overflow-hidden border-neo border-neo-ink rounded-xl shadow-neo transition-all ${
+        style={{ ...artboardBgStyle, aspectRatio: `1 / ${hRatioNow}`, touchAction: 'none' }}
+        className={`w-full relative overflow-hidden border-neo border-neo-ink rounded-xl shadow-neo transition-all ${
           activeTool !== 'select' ? 'cursor-crosshair' : ''
         } ${isDragOverBoard ? 'ring-4 ring-neo-teal border-neo-teal' : ''}`}
       >
@@ -2503,6 +2684,13 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
           return (
             <div
               key={layer.id}
+              onContextMenu={(e) => {
+                // Layer-level menu (send to back / bring to front …) instead of the page-level one
+                e.preventDefault();
+                e.stopPropagation();
+                if (!selectedIds.includes(layer.id)) setSelectedIds([layer.id]);
+                setLayerMenu({ x: e.clientX, y: e.clientY, layerId: layer.id });
+              }}
               onPointerDown={(e) => startLayerDrag(e, layer)}
               onClick={(e) => {
                 e.stopPropagation();
@@ -2697,217 +2885,60 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
         })}
       </div>
 
-      {/* Selected Layer(s) Inspector & Transform Controls Bar */}
+      {/* Artboard size handles: drag the right / bottom edge or the corner for a free width & height */}
+      {selected && (
+        <>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            title="Drag to resize artboard width"
+            onPointerDown={(e) => startArtboardResize(e, 'x')}
+            style={{ touchAction: 'none' }}
+            className="absolute top-0 -right-3 bottom-0 w-3 z-30 cursor-ew-resize flex items-center justify-center group/ab"
+          >
+            <div className="w-1 h-10 max-h-full rounded-full bg-neo-violet/70 group-hover/ab:bg-neo-violet" />
+          </div>
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            title="Drag to resize artboard height"
+            onPointerDown={(e) => startArtboardResize(e, 'y')}
+            style={{ touchAction: 'none' }}
+            className="absolute left-0 -bottom-3 right-0 h-3 z-30 cursor-ns-resize flex items-center justify-center group/ab"
+          >
+            <div className="h-1 w-10 max-w-full rounded-full bg-neo-violet/70 group-hover/ab:bg-neo-violet" />
+          </div>
+          <div
+            title="Drag to resize artboard width & height"
+            onPointerDown={(e) => startArtboardResize(e, 'xy')}
+            style={{ touchAction: 'none' }}
+            className="absolute -right-3 -bottom-3 w-4 h-4 z-30 cursor-nwse-resize rounded-full bg-neo-violet border-2 border-white shadow"
+          />
+          {(liveHeightRatio !== null || liveWidthPct !== null) && (
+            <div className="absolute -top-6 right-0 z-30 px-1.5 py-0.5 rounded bg-neo-ink text-white text-[10px] font-mono pointer-events-none">
+              {Math.round(widthPctNow)}% × {hRatioNow.toFixed(2)}
+            </div>
+          )}
+        </>
+      )}
+      </div>
+
+      {isDockOpen && (
+        <StageDockPortal slot="bottom">
+      {/* Selected layer(s): one compact row of context controls + two menus */}
       {selectedLayersList.length > 0 && activeLayer && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="mt-2 p-2.5 bg-white border-neo border-neo-ink rounded-lg shadow-neo-sm flex flex-col gap-2 text-[11px] font-mono"
+          className="p-2 bg-white border-neo border-neo-ink rounded-lg shadow-neo-sm flex flex-col gap-2 text-[11px] font-mono"
         >
-          {/* Row 1: Selection Info + Auto-Align + Z-Order + Flip + Actions */}
-          <div className="flex flex-wrap items-center justify-between gap-1.5 pb-2 border-b border-gray-100">
-            <div className="flex flex-wrap items-center gap-1">
-              <span className="px-1.5 py-0.5 rounded bg-neo-ink text-neo-yellow text-[10px] font-bold mr-1">
-                {selectedLayersList.length > 1
-                  ? `${selectedLayersList.length} SELECTED`
-                  : activeLayer.name || activeLayer.type.toUpperCase()}
-              </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="px-1.5 py-0.5 rounded bg-neo-ink text-neo-yellow text-[10px] font-bold max-w-[130px] truncate">
+              {selectedLayersList.length > 1
+                ? `${selectedLayersList.length} selected`
+                : activeLayer.name || activeLayer.type}
+            </span>
 
-              <button
-                type="button"
-                onClick={() => alignSelectedLayers('left')}
-                className="p-1 bg-neo-bg hover:bg-neo-yellow border border-neo-ink rounded"
-                title="Align Left"
-              >
-                <AlignStartVertical className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => alignSelectedLayers('center-x')}
-                className="p-1 bg-neo-bg hover:bg-neo-yellow border border-neo-ink rounded"
-                title="Align Horizontal Center"
-              >
-                <AlignCenterVertical className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => alignSelectedLayers('right')}
-                className="p-1 bg-neo-bg hover:bg-neo-yellow border border-neo-ink rounded"
-                title="Align Right"
-              >
-                <AlignEndVertical className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => alignSelectedLayers('top')}
-                className="p-1 bg-neo-bg hover:bg-neo-yellow border border-neo-ink rounded"
-                title="Align Top"
-              >
-                <AlignStartHorizontal className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => alignSelectedLayers('center-y')}
-                className="p-1 bg-neo-bg hover:bg-neo-yellow border border-neo-ink rounded"
-                title="Align Vertical Middle"
-              >
-                <AlignCenterHorizontal className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => alignSelectedLayers('bottom')}
-                className="p-1 bg-neo-bg hover:bg-neo-yellow border border-neo-ink rounded"
-                title="Align Bottom"
-              >
-                <AlignEndHorizontal className="w-3 h-3" />
-              </button>
-
-              {selectedLayersList.length >= 2 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => alignSelectedLayers('distribute-x')}
-                    className="px-1.5 py-0.5 bg-neo-teal/30 hover:bg-neo-teal border border-neo-ink rounded text-[10px] font-bold"
-                    title="Distribute Horizontally"
-                  >
-                    Dist X
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => alignSelectedLayers('distribute-y')}
-                    className="px-1.5 py-0.5 bg-neo-teal/30 hover:bg-neo-teal border border-neo-ink rounded text-[10px] font-bold"
-                    title="Distribute Vertically"
-                  >
-                    Dist Y
-                  </button>
-                </>
-              )}
-            </div>
-
-            {/* Rotate 90, Flip, Z-Order, Duplicate & Delete */}
-            <div className="flex flex-wrap items-center gap-1">
-              <button
-                type="button"
-                onClick={() =>
-                  setProp((p: FreeformCanvasBlockProps) => {
-                    (p.layers || []).forEach((l) => {
-                      if (selectedIds.includes(l.id) && !l.locked) {
-                        l.rotation = ((l.rotation || 0) - 45 + 180) % 360 - 180;
-                      }
-                    });
-                  })
-                }
-                className="p-1 bg-neo-bg hover:bg-neo-yellow border border-neo-ink rounded"
-                title="Rotate -45°"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setProp((p: FreeformCanvasBlockProps) => {
-                    (p.layers || []).forEach((l) => {
-                      if (selectedIds.includes(l.id) && !l.locked) {
-                        l.rotation = ((l.rotation || 0) + 45 + 180) % 360 - 180;
-                      }
-                    });
-                  })
-                }
-                className="p-1 bg-neo-bg hover:bg-neo-yellow border border-neo-ink rounded"
-                title="Rotate +45°"
-              >
-                <RotateCw className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setProp((p: FreeformCanvasBlockProps) => {
-                    (p.layers || []).forEach((l) => {
-                      if (selectedIds.includes(l.id) && !l.locked) {
-                        l.flipX = !l.flipX;
-                      }
-                    });
-                  })
-                }
-                className={`p-1 border border-neo-ink rounded ${
-                  activeLayer.flipX ? 'bg-neo-yellow' : 'bg-neo-bg'
-                }`}
-                title="Flip Horizontally"
-              >
-                <FlipHorizontal className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setProp((p: FreeformCanvasBlockProps) => {
-                    (p.layers || []).forEach((l) => {
-                      if (selectedIds.includes(l.id) && !l.locked) {
-                        l.flipY = !l.flipY;
-                      }
-                    });
-                  })
-                }
-                className={`p-1 border border-neo-ink rounded ${
-                  activeLayer.flipY ? 'bg-neo-yellow' : 'bg-neo-bg'
-                }`}
-                title="Flip Vertically"
-              >
-                <FlipVertical className="w-3 h-3" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => reorderLayerZ(activeLayer.id, 'front')}
-                className="p-1 bg-neo-bg hover:bg-neo-teal border border-neo-ink rounded"
-                title="Bring to Front"
-              >
-                <ChevronsUp className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => reorderLayerZ(activeLayer.id, 'forward')}
-                className="p-1 bg-neo-bg hover:bg-neo-teal border border-neo-ink rounded"
-                title="Bring Forward"
-              >
-                <ArrowUp className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => reorderLayerZ(activeLayer.id, 'backward')}
-                className="p-1 bg-neo-bg hover:bg-neo-teal border border-neo-ink rounded"
-                title="Send Backward"
-              >
-                <ArrowDown className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => reorderLayerZ(activeLayer.id, 'back')}
-                className="p-1 bg-neo-bg hover:bg-neo-teal border border-neo-ink rounded"
-                title="Send to Back"
-              >
-                <ChevronsDown className="w-3 h-3" />
-              </button>
-
-              <button
-                type="button"
-                onClick={duplicateSelectedLayers}
-                className="p-1 bg-neo-bg hover:bg-neo-yellow border border-neo-ink rounded"
-                title="Duplicate Selected Layer(s)"
-              >
-                <Copy className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={deleteSelectedLayers}
-                className="p-1 bg-neo-vermilion text-white border border-neo-ink rounded"
-                title="Delete Selected Layer(s)"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-
-          {/* Row 2: Text / Vector Asset / Resize / Rotate / Color Controls */}
-          <div className="flex flex-wrap items-center gap-2">
+            {/* Context controls for the active layer */}
             {(activeLayer.type === 'text' || activeLayer.type === 'shape') && (
               <>
                 <input
@@ -2919,11 +2950,11 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
                       if (target) target.text = e.target.value;
                     })
                   }
-                  placeholder="Layer text..."
-                  className="flex-1 min-w-[110px] px-2 py-1 bg-neo-bg border border-neo-ink rounded text-xs"
+                  placeholder="Text…"
+                  className="flex-1 min-w-[100px] px-2 py-1 bg-neo-bg border border-neo-ink rounded text-xs"
                 />
-                <label className="flex items-center gap-1" title="Text Font Size (px)">
-                  <span>Font</span>
+                <label className="flex items-center gap-1" title="Font size (px)">
+                  <Type className="w-3 h-3" />
                   <input
                     type="number"
                     min={8}
@@ -2932,9 +2963,7 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
                     onChange={(e) =>
                       setProp((p: FreeformCanvasBlockProps) => {
                         (p.layers || []).forEach((l) => {
-                          if (selectedIds.includes(l.id)) {
-                            l.fontSize = Number(e.target.value);
-                          }
+                          if (selectedIds.includes(l.id)) l.fontSize = Number(e.target.value);
                         });
                       })
                     }
@@ -2947,14 +2976,12 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
                   onChange={(e) =>
                     setProp((p: FreeformCanvasBlockProps) => {
                       (p.layers || []).forEach((l) => {
-                        if (selectedIds.includes(l.id)) {
-                          l.color = e.target.value;
-                        }
+                        if (selectedIds.includes(l.id)) l.color = e.target.value;
                       });
                     })
                   }
                   title="Text color"
-                  className="w-6 h-6 rounded border border-neo-ink cursor-pointer"
+                  className="w-6 h-6 p-0 rounded border border-neo-ink cursor-pointer"
                 />
               </>
             )}
@@ -2970,117 +2997,303 @@ export const FreeformCanvasBlock: UserComponent<FreeformCanvasBlockProps> = ({
                       if (target) target.imageSrc = e.target.value;
                     })
                   }
-                  placeholder="Asset / SVG URL..."
+                  placeholder="Image / SVG URL…"
                   className="flex-1 min-w-[120px] px-2 py-1 bg-neo-bg border border-neo-ink rounded text-xs"
                 />
                 {activeLayer.iconifyId && (
-                  <label className="flex items-center gap-1" title="Recolor Vector Asset">
-                    <span>Vector Tint</span>
-                    <input
-                      type="color"
-                      value={activeLayer.color || '#141414'}
-                      onChange={(e) => updateVectorAssetColor(activeLayer.id, e.target.value)}
-                      className="w-6 h-6 rounded border border-neo-ink cursor-pointer"
-                    />
-                  </label>
+                  <input
+                    type="color"
+                    value={activeLayer.color || '#141414'}
+                    onChange={(e) => updateVectorAssetColor(activeLayer.id, e.target.value)}
+                    title="Recolor vector"
+                    className="w-6 h-6 p-0 rounded border border-neo-ink cursor-pointer"
+                  />
                 )}
               </>
             )}
 
-            <label className="flex items-center gap-1" title="Width %">
-              <span>W%</span>
-              <input
-                type="number"
-                min={4}
-                max={100}
-                value={activeLayer.width}
-                onChange={(e) =>
-                  setProp((p: FreeformCanvasBlockProps) => {
-                    const target = (p.layers || []).find((l) => l.id === activeLayer.id);
-                    if (target) target.width = Number(e.target.value);
-                  })
-                }
-                className="w-11 px-1 py-0.5 bg-neo-bg border border-neo-ink rounded text-center"
-              />
-            </label>
+            {activeLayer.type !== 'image' && (
+              <span className="flex items-center gap-1" title="Fill color">
+                <input
+                  type="color"
+                  value={
+                    activeLayer.fill && activeLayer.fill !== 'transparent' ? activeLayer.fill : '#FFD23F'
+                  }
+                  onChange={(e) =>
+                    setProp((p: FreeformCanvasBlockProps) => {
+                      (p.layers || []).forEach((l) => {
+                        if (selectedIds.includes(l.id)) l.fill = e.target.value;
+                      });
+                    })
+                  }
+                  className="w-6 h-6 p-0 rounded border border-neo-ink cursor-pointer"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setProp((p: FreeformCanvasBlockProps) => {
+                      (p.layers || []).forEach((l) => {
+                        if (selectedIds.includes(l.id)) l.fill = 'transparent';
+                      });
+                    })
+                  }
+                  className="px-1.5 py-0.5 bg-neo-bg hover:bg-white border border-neo-ink rounded text-[10px]"
+                  title="No fill"
+                >
+                  No fill
+                </button>
+              </span>
+            )}
 
-            <label className="flex items-center gap-1" title="Height %">
-              <span>H%</span>
-              <input
-                type="number"
-                min={4}
-                max={100}
-                value={activeLayer.height}
-                onChange={(e) =>
-                  setProp((p: FreeformCanvasBlockProps) => {
-                    const target = (p.layers || []).find((l) => l.id === activeLayer.id);
-                    if (target) target.height = Number(e.target.value);
-                  })
-                }
-                className="w-11 px-1 py-0.5 bg-neo-bg border border-neo-ink rounded text-center"
-              />
-            </label>
+            <div className="flex items-center gap-1 ml-auto">
+              <FcMenu
+                title="Align & distribute"
+                label="Align"
+                align="right"
+                buttonClassName="bg-neo-bg hover:bg-neo-yellow border border-neo-ink text-neo-ink"
+                icon={<AlignCenterVertical className="w-3.5 h-3.5" />}
+              >
+                {() => (
+                  <div className="flex flex-col gap-1 text-neo-ink">
+                    <div className="grid grid-cols-3 gap-1">
+                      {(
+                        [
+                          ['left', 'Align left', <AlignStartVertical key="l" className="w-3.5 h-3.5" />],
+                          ['center-x', 'Center horizontally', <AlignCenterVertical key="cx" className="w-3.5 h-3.5" />],
+                          ['right', 'Align right', <AlignEndVertical key="r" className="w-3.5 h-3.5" />],
+                          ['top', 'Align top', <AlignStartHorizontal key="t" className="w-3.5 h-3.5" />],
+                          ['center-y', 'Center vertically', <AlignCenterHorizontal key="cy" className="w-3.5 h-3.5" />],
+                          ['bottom', 'Align bottom', <AlignEndHorizontal key="b" className="w-3.5 h-3.5" />],
+                        ] as const
+                      ).map(([mode, label, icon]) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          title={label}
+                          onClick={() => alignSelectedLayers(mode)}
+                          className="p-1.5 flex justify-center bg-neo-bg hover:bg-neo-yellow border border-neo-ink rounded"
+                        >
+                          {icon}
+                        </button>
+                      ))}
+                    </div>
+                    {selectedLayersList.length >= 2 && (
+                      <div className="grid grid-cols-2 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => alignSelectedLayers('distribute-x')}
+                          className="px-1.5 py-1 bg-neo-teal/30 hover:bg-neo-teal border border-neo-ink rounded text-[10px] font-bold"
+                        >
+                          Space ↔
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => alignSelectedLayers('distribute-y')}
+                          className="px-1.5 py-1 bg-neo-teal/30 hover:bg-neo-teal border border-neo-ink rounded text-[10px] font-bold"
+                        >
+                          Space ↕
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </FcMenu>
 
-            <label className="flex items-center gap-1" title="Rotation degrees (-180° to 180°)">
-              <RotateCw className="w-3 h-3" />
-              <input
-                type="number"
-                min={-180}
-                max={180}
-                value={activeLayer.rotation || 0}
-                onChange={(e) =>
-                  setProp((p: FreeformCanvasBlockProps) => {
-                    (p.layers || []).forEach((l) => {
-                      if (selectedIds.includes(l.id)) {
-                        l.rotation = Number(e.target.value);
-                      }
-                    });
-                  })
-                }
-                className="w-12 px-1 py-0.5 bg-neo-bg border border-neo-ink rounded text-center"
-              />
-            </label>
+              <FcMenu
+                title="Order, rotate & flip"
+                label="Arrange"
+                align="right"
+                buttonClassName="bg-neo-bg hover:bg-neo-yellow border border-neo-ink text-neo-ink"
+                icon={<Layers className="w-3.5 h-3.5" />}
+              >
+                {() => (
+                  <div className="flex flex-col gap-1 text-neo-ink min-w-[150px]">
+                    <span className="text-[9px] uppercase tracking-wider text-gray-500">Order</span>
+                    <div className="grid grid-cols-4 gap-1">
+                      {(
+                        [
+                          ['front', 'Bring to front', <ChevronsUp key="f" className="w-3.5 h-3.5" />],
+                          ['forward', 'Bring forward', <ArrowUp key="fw" className="w-3.5 h-3.5" />],
+                          ['backward', 'Send backward', <ArrowDown key="bw" className="w-3.5 h-3.5" />],
+                          ['back', 'Send to back', <ChevronsDown key="b" className="w-3.5 h-3.5" />],
+                        ] as const
+                      ).map(([mode, label, icon]) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          title={label}
+                          onClick={() => reorderLayerZ(activeLayer.id, mode)}
+                          className="p-1.5 flex justify-center bg-neo-bg hover:bg-neo-teal border border-neo-ink rounded"
+                        >
+                          {icon}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="text-[9px] uppercase tracking-wider text-gray-500 mt-1">Rotate & flip</span>
+                    <div className="grid grid-cols-4 gap-1">
+                      <button
+                        type="button"
+                        title="Rotate -45°"
+                        onClick={() =>
+                          setProp((p: FreeformCanvasBlockProps) => {
+                            (p.layers || []).forEach((l) => {
+                              if (selectedIds.includes(l.id) && !l.locked) {
+                                l.rotation = (((l.rotation || 0) - 45 + 180) % 360) - 180;
+                              }
+                            });
+                          })
+                        }
+                        className="p-1.5 flex justify-center bg-neo-bg hover:bg-neo-yellow border border-neo-ink rounded"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        title="Rotate +45°"
+                        onClick={() =>
+                          setProp((p: FreeformCanvasBlockProps) => {
+                            (p.layers || []).forEach((l) => {
+                              if (selectedIds.includes(l.id) && !l.locked) {
+                                l.rotation = (((l.rotation || 0) + 45 + 180) % 360) - 180;
+                              }
+                            });
+                          })
+                        }
+                        className="p-1.5 flex justify-center bg-neo-bg hover:bg-neo-yellow border border-neo-ink rounded"
+                      >
+                        <RotateCw className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        title="Flip horizontally"
+                        onClick={() =>
+                          setProp((p: FreeformCanvasBlockProps) => {
+                            (p.layers || []).forEach((l) => {
+                              if (selectedIds.includes(l.id) && !l.locked) l.flipX = !l.flipX;
+                            });
+                          })
+                        }
+                        className={`p-1.5 flex justify-center border border-neo-ink rounded ${
+                          activeLayer.flipX ? 'bg-neo-yellow' : 'bg-neo-bg hover:bg-neo-yellow'
+                        }`}
+                      >
+                        <FlipHorizontal className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        title="Flip vertically"
+                        onClick={() =>
+                          setProp((p: FreeformCanvasBlockProps) => {
+                            (p.layers || []).forEach((l) => {
+                              if (selectedIds.includes(l.id) && !l.locked) l.flipY = !l.flipY;
+                            });
+                          })
+                        }
+                        className={`p-1.5 flex justify-center border border-neo-ink rounded ${
+                          activeLayer.flipY ? 'bg-neo-yellow' : 'bg-neo-bg hover:bg-neo-yellow'
+                        }`}
+                      >
+                        <FlipVertical className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </FcMenu>
 
-            <label className="flex items-center gap-1" title="Layer Fill / Backdrop">
-              <span>Fill</span>
-              <input
-                type="color"
-                value={
-                  activeLayer.fill && activeLayer.fill !== 'transparent'
-                    ? activeLayer.fill
-                    : '#FFD23F'
-                }
-                onChange={(e) =>
-                  setProp((p: FreeformCanvasBlockProps) => {
-                    (p.layers || []).forEach((l) => {
-                      if (selectedIds.includes(l.id)) {
-                        l.fill = e.target.value;
-                      }
-                    });
-                  })
-                }
-                className="w-6 h-6 rounded border border-neo-ink cursor-pointer"
-              />
               <button
                 type="button"
-                onClick={() =>
-                  setProp((p: FreeformCanvasBlockProps) => {
-                    (p.layers || []).forEach((l) => {
-                      if (selectedIds.includes(l.id)) {
-                        l.fill = 'transparent';
-                      }
-                    });
-                  })
-                }
-                className="px-1.5 py-0.5 bg-neo-bg hover:bg-white border border-neo-ink rounded text-[10px]"
-                title="Clear layer background fill to transparent"
+                onClick={duplicateSelectedLayers}
+                className="p-1.5 bg-neo-bg hover:bg-neo-yellow border border-neo-ink rounded"
+                title="Duplicate"
               >
-                Clear
+                <Copy className="w-3.5 h-3.5" />
               </button>
-            </label>
+              <button
+                type="button"
+                onClick={deleteSelectedLayers}
+                className="p-1.5 bg-neo-vermilion text-white border border-neo-ink rounded"
+                title="Delete"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
+
+          {/* Precise numbers, tucked away */}
+          <details className="text-gray-600">
+            <summary className="cursor-pointer select-none text-[10px] uppercase tracking-wider">
+              Size &amp; rotation
+            </summary>
+            <div className="flex flex-wrap items-center gap-3 pt-1.5">
+              {(
+                [
+                  ['W %', 'width', 4, 100],
+                  ['H %', 'height', 4, 100],
+                ] as const
+              ).map(([label, key, min, max]) => (
+                <label key={key} className="flex items-center gap-1">
+                  <span>{label}</span>
+                  <input
+                    type="number"
+                    min={min}
+                    max={max}
+                    value={Math.round(activeLayer[key] * 10) / 10}
+                    onChange={(e) =>
+                      setProp((p: FreeformCanvasBlockProps) => {
+                        const target = (p.layers || []).find((l) => l.id === activeLayer.id);
+                        if (target) target[key] = Number(e.target.value);
+                      })
+                    }
+                    className="w-14 px-1 py-0.5 bg-neo-bg border border-neo-ink rounded text-center"
+                  />
+                </label>
+              ))}
+              <label className="flex items-center gap-1" title="Rotation (-180° to 180°)">
+                <RotateCw className="w-3 h-3" />
+                <input
+                  type="number"
+                  min={-180}
+                  max={180}
+                  value={activeLayer.rotation || 0}
+                  onChange={(e) =>
+                    setProp((p: FreeformCanvasBlockProps) => {
+                      (p.layers || []).forEach((l) => {
+                        if (selectedIds.includes(l.id)) l.rotation = Number(e.target.value);
+                      });
+                    })
+                  }
+                  className="w-14 px-1 py-0.5 bg-neo-bg border border-neo-ink rounded text-center"
+                />
+              </label>
+            </div>
+          </details>
         </div>
       )}
+
+        </StageDockPortal>
+      )}
+
+      {layerMenu && (() => {
+        const iconCls = 'w-3.5 h-3.5';
+        const id = layerMenu.layerId;
+        const idx = layers.findIndex((l) => l.id === id);
+        const atFront = idx === layers.length - 1;
+        const atBack = idx === 0;
+        const items: ContextMenuItem[] = [
+          { id: 'h', heading: layers[idx]?.name || layers[idx]?.type || 'Layer' },
+          { id: 'front', label: 'Bring to front', icon: <ChevronsUp className={iconCls} />, disabled: atFront, onClick: () => reorderLayerZ(id, 'front') },
+          { id: 'forward', label: 'Bring forward', icon: <ArrowUp className={iconCls} />, disabled: atFront, onClick: () => reorderLayerZ(id, 'forward') },
+          { id: 'backward', label: 'Send backward', icon: <ArrowDown className={iconCls} />, disabled: atBack, onClick: () => reorderLayerZ(id, 'backward') },
+          { id: 'back', label: 'Send to back', icon: <ChevronsDown className={iconCls} />, disabled: atBack, onClick: () => reorderLayerZ(id, 'back') },
+          { id: 's1', separator: true },
+          { id: 'dup', label: 'Copy / duplicate', icon: <Copy className={iconCls} />, onClick: duplicateSelectedLayers },
+          { id: 'del', label: 'Remove element', icon: <Trash2 className={iconCls} />, danger: true, shortcut: 'Del', onClick: deleteSelectedLayers },
+          { id: 's2', separator: true },
+          { id: 'undo', label: 'Undo', icon: <Undo2 className={iconCls} />, shortcut: 'Ctrl+Z', disabled: !canUndo, onClick: undo },
+          { id: 'redo', label: 'Redo', icon: <Redo2 className={iconCls} />, shortcut: 'Ctrl+Y', disabled: !canRedo, onClick: redo },
+        ];
+        return <ContextMenu x={layerMenu.x} y={layerMenu.y} items={items} onClose={() => setLayerMenu(null)} />;
+      })()}
 
       {caption && (
         <figcaption className="mt-2 text-center font-mono text-xs text-gray-500">
@@ -3157,9 +3370,10 @@ export const FreeformCanvasSettings: React.FC = () => {
               onClick={() =>
                 setProp((p: FreeformCanvasBlockProps) => {
                   const oldRatio = p.aspectRatio || '16/9';
-                  if (oldRatio === ratio) return;
-                  const oldH = getArtboardHeightRatio(oldRatio);
+                  const oldH = getArtboardHeightRatio(oldRatio, p.artboardHeight);
                   const newH = getArtboardHeightRatio(ratio);
+                  if (oldH === newH && p.artboardHeight === undefined) return;
+                  p.artboardHeight = undefined;
                   const scaleY = oldH / newH;
                   (p.layers || []).forEach((layer) => {
                     layer.y = Number(
@@ -3173,7 +3387,7 @@ export const FreeformCanvasSettings: React.FC = () => {
                 })
               }
               className={`py-1.5 text-center font-mono border-neo border-neo-ink rounded ${
-                props.aspectRatio === ratio
+                props.aspectRatio === ratio && props.artboardHeight === undefined
                   ? 'bg-neo-yellow font-bold shadow-neo-sm'
                   : 'bg-white'
               }`}
@@ -3182,6 +3396,47 @@ export const FreeformCanvasSettings: React.FC = () => {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Free-form artboard size (also draggable on the canvas) */}
+      <div className="grid grid-cols-2 gap-2">
+        <label className="flex flex-col font-mono text-[10px] text-gray-500">
+          Width (% of page)
+          <input
+            type="number"
+            min={MIN_ARTBOARD_WIDTH_PCT}
+            max={100}
+            value={Math.round(getArtboardWidthPct(props.artboardWidth))}
+            onChange={(e) =>
+              setProp((p: FreeformCanvasBlockProps) => {
+                const v = Number(e.target.value);
+                if (Number.isFinite(v)) p.artboardWidth = Math.min(100, Math.max(MIN_ARTBOARD_WIDTH_PCT, v));
+              })
+            }
+            className="mt-0.5 bg-white border border-neo-ink px-1.5 py-1 rounded text-xs"
+          />
+        </label>
+        <label className="flex flex-col font-mono text-[10px] text-gray-500">
+          Height (× width)
+          <input
+            type="number"
+            step={0.05}
+            min={MIN_ARTBOARD_HEIGHT_RATIO}
+            max={MAX_ARTBOARD_HEIGHT_RATIO}
+            value={Number(getArtboardHeightRatio(props.aspectRatio, props.artboardHeight).toFixed(2))}
+            onChange={(e) =>
+              setProp((p: FreeformCanvasBlockProps) => {
+                const v = Number(e.target.value);
+                if (!Number.isFinite(v) || v <= 0) return;
+                const next = Math.min(MAX_ARTBOARD_HEIGHT_RATIO, Math.max(MIN_ARTBOARD_HEIGHT_RATIO, v));
+                const prev = getArtboardHeightRatio(p.aspectRatio, p.artboardHeight);
+                p.layers = scaleLayersForHeight(p.layers || [], prev, next);
+                p.artboardHeight = next;
+              })
+            }
+            className="mt-0.5 bg-white border border-neo-ink px-1.5 py-1 rounded text-xs"
+          />
+        </label>
       </div>
 
       {/* Artboard Background Mode & Settings */}

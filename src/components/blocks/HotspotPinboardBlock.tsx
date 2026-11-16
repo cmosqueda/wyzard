@@ -57,7 +57,59 @@ export const HotspotPinboardBlock: UserComponent<HotspotPinboardProps> = ({
   }));
 
   const [activePinId, setActivePinId] = useState<string | null>(pins[0]?.id || null);
-  const activePin = pins.find((p) => p.id === activePinId);
+
+  // Live pin drag state (committed to node props on pointer release)
+  const boardRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ id: string; startX: number; startY: number; moved: boolean } | null>(null);
+  const [dragPos, setDragPos] = useState<{ id: string; x: number; y: number } | null>(null);
+  const justDraggedRef = useRef(false);
+
+  const positionedPins = pins.map((p) =>
+    dragPos && dragPos.id === p.id ? { ...p, x: dragPos.x, y: dragPos.y } : p
+  );
+  const activePin = positionedPins.find((p) => p.id === activePinId);
+
+  const pointToPercent = (clientX: number, clientY: number) => {
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) return null;
+    const clamp = (v: number) => Math.min(100, Math.max(0, Math.round(v * 10) / 10));
+    return {
+      x: clamp(((clientX - rect.left) / rect.width) * 100),
+      y: clamp(((clientY - rect.top) / rect.height) * 100),
+    };
+  };
+
+  const handlePinPointerDown = (e: React.PointerEvent<HTMLButtonElement>, pinId: string) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    dragRef.current = { id: pinId, startX: e.clientX, startY: e.clientY, moved: false };
+  };
+
+  const handlePinPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 4) return;
+    drag.moved = true;
+    const pos = pointToPercent(e.clientX, e.clientY);
+    if (pos) setDragPos({ id: drag.id, ...pos });
+  };
+
+  const handlePinPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    if (!drag || !drag.moved) return;
+    justDraggedRef.current = true;
+    setTimeout(() => (justDraggedRef.current = false), 0);
+    const pos = pointToPercent(e.clientX, e.clientY);
+    setDragPos(null);
+    if (pos) {
+      setProp((p: HotspotPinboardProps) => {
+        p.pins = (p.pins || []).map((pin) => (pin.id === drag.id ? { ...pin, ...pos } : pin));
+      });
+    }
+  };
 
   return (
     <figure
@@ -86,7 +138,10 @@ export const HotspotPinboardBlock: UserComponent<HotspotPinboardProps> = ({
       </div>
 
       {/* Main Image with Hotspot Pins */}
-      <div className="relative w-full rounded-lg overflow-hidden border-neo border-neo-ink bg-gray-900 shadow-neo aspect-[16/10]">
+      <div
+        ref={boardRef}
+        className="relative w-full rounded-lg overflow-hidden border-neo border-neo-ink bg-gray-900 shadow-neo aspect-[16/10]"
+      >
         <img
           src={imageSrc}
           alt={alt}
@@ -94,22 +149,33 @@ export const HotspotPinboardBlock: UserComponent<HotspotPinboardProps> = ({
         />
 
         {/* Hotspot Pins */}
-        {pins.map((pin) => {
+        {positionedPins.map((pin) => {
           const isActive = pin.id === activePinId;
+          const isDragging = dragPos?.id === pin.id;
           return (
             <button
               key={pin.id}
+              type="button"
+              draggable={false}
+              onMouseDown={(e) => e.preventDefault()}
+              onPointerDown={(e) => handlePinPointerDown(e, pin.id)}
+              onPointerMove={handlePinPointerMove}
+              onPointerUp={handlePinPointerUp}
+              onPointerCancel={handlePinPointerUp}
               onClick={(e) => {
                 e.stopPropagation();
+                if (justDraggedRef.current) return;
                 setActivePinId(isActive ? null : pin.id);
               }}
-              style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
-              className={`absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2 rounded-full border-neo border-neo-ink font-mono font-bold text-xs flex items-center justify-center transition-transform hover:scale-110 active:scale-95 shadow-neo-sm z-10 ${
+              style={{ left: `${pin.x}%`, top: `${pin.y}%`, touchAction: 'none' }}
+              className={`absolute w-7 h-7 -translate-x-1/2 -translate-y-1/2 rounded-full border-neo border-neo-ink font-mono font-bold text-xs flex items-center justify-center hover:scale-110 shadow-neo-sm z-10 ${
+                isDragging ? 'cursor-grabbing scale-125' : 'cursor-grab transition-transform active:scale-95'
+              } ${
                 isActive
                   ? 'bg-neo-vermilion text-white ring-4 ring-white/60 scale-110'
                   : 'bg-neo-yellow text-neo-ink'
               }`}
-              title={`${pin.number}. ${pin.title}`}
+              title={`${pin.number}. ${pin.title} — drag to move`}
             >
               {pin.number}
             </button>
@@ -373,8 +439,8 @@ export const HotspotPinboardSettings: React.FC = () => {
                         </span>
                         <input
                           type="range"
-                          min="5"
-                          max="95"
+                          min="0"
+                          max="100"
                           value={pin.x}
                           onChange={(e) => handleUpdatePin(pin.id, { x: Number(e.target.value) })}
                           className="w-full accent-neo-ink"
@@ -386,8 +452,8 @@ export const HotspotPinboardSettings: React.FC = () => {
                         </span>
                         <input
                           type="range"
-                          min="5"
-                          max="95"
+                          min="0"
+                          max="100"
                           value={pin.y}
                           onChange={(e) => handleUpdatePin(pin.id, { y: Number(e.target.value) })}
                           className="w-full accent-neo-ink"

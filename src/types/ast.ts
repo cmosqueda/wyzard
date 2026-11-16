@@ -134,12 +134,20 @@ export interface BookMetadata {
   attributions?: AssetAttribution[];
 }
 
+/**
+ * Design system applied to the page canvas (not the Wyzard app chrome).
+ * - 'plain': blank, unthemed page like Canva / Figma (default for new blank projects)
+ * - 'wyzard': the neo-brutalist Wyzard editorial look (templates, starter, legacy projects)
+ */
+export type CanvasDesignSystem = 'plain' | 'wyzard';
+
 export interface BookProject {
   id: string;
   title: string;
   metadata: BookMetadata;
   chapters: Chapter[];
   activeChapterId: string;
+  designSystem?: CanvasDesignSystem; // undefined => 'wyzard' (legacy projects)
   createdAt: number;
   updatedAt: number;
 }

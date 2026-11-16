@@ -10,6 +10,9 @@ import { WebReaderModal, type ReaderEngineMode } from '../preview/WebReaderModal
 import type { ScreenRatioKey } from '../../compiler/multiFormatExporter';
 import { TemplatePickerModal } from '../templates/TemplatePickerModal';
 import { SettingsModal } from '../settings/SettingsModal';
+import { MetadataModal } from './MetadataModal';
+import { CanvasContextMenu } from './centerStage/CanvasContextMenu';
+import { CanvasShortcuts } from './centerStage/CanvasShortcuts';
 
 // Craft.js resolvers
 import { CanvasContainer } from '../blocks/CanvasContainer';
@@ -24,9 +27,19 @@ import { HotspotPinboardBlock } from '../blocks/HotspotPinboardBlock';
 import { VisualGalleryBlock } from '../blocks/VisualGalleryBlock';
 import { AudioNarrationBlock } from '../blocks/AudioNarrationBlock';
 import { FreeformCanvasBlock } from '../blocks/FreeformCanvasBlock';
+import { TableBlock } from '../blocks/TableBlock';
 
 export const EditorWorkspace: React.FC = () => {
-  const { project, viewportMode, undo, redo, saveProjectToDb, updateChapterCraftState } = useEditorStore();
+  const {
+    project,
+    viewportMode,
+    undo,
+    redo,
+    saveProjectToDb,
+    updateChapterCraftState,
+    isMetadataOpen,
+    setMetadataOpen,
+  } = useEditorStore();
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isWebReaderOpen, setIsWebReaderOpen] = useState(false);
   const [readerInitialEngine, setReaderInitialEngine] = useState<ReaderEngineMode>('web');
@@ -48,6 +61,53 @@ export const EditorWorkspace: React.FC = () => {
     saveProjectToDb();
   }, [project.id]);
 
+  // Text-editing drag guard: Craft.js makes every block `draggable`, so click-dragging across text
+  // (or inside an input) would pick up the whole block instead of selecting characters. While the
+  // pointer is pressed on an editable control we switch off `draggable` on its ancestors.
+  useEffect(() => {
+    let restore: (() => void) | null = null;
+
+    const finish = () => {
+      restore?.();
+    };
+
+    const onMouseDown = (e: MouseEvent) => {
+      finish();
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest) return;
+      const isEditable = target.closest(
+        '[contenteditable=""], [contenteditable="true"], input, textarea, select, [data-no-block-drag]'
+      );
+      if (!isEditable) return;
+
+      const locked: HTMLElement[] = [];
+      for (let node = target as HTMLElement | null; node; node = node.parentElement) {
+        if (node.getAttribute('draggable') === 'true') {
+          node.setAttribute('draggable', 'false');
+          locked.push(node);
+        }
+      }
+      if (locked.length === 0) return;
+
+      restore = () => {
+        locked.forEach((el) => el.setAttribute('draggable', 'true'));
+        window.removeEventListener('mouseup', finish, true);
+        window.removeEventListener('dragend', finish, true);
+        window.removeEventListener('blur', finish);
+        restore = null;
+      };
+      window.addEventListener('mouseup', finish, true);
+      window.addEventListener('dragend', finish, true);
+      window.addEventListener('blur', finish);
+    };
+
+    document.addEventListener('mousedown', onMouseDown, true);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown, true);
+      finish();
+    };
+  }, []);
+
   // Global Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -62,20 +122,6 @@ export const EditorWorkspace: React.FC = () => {
         e.preventDefault();
         saveProjectToDb();
         return;
-      }
-
-      if (!isInput && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        if (e.shiftKey) {
-          redo();
-        } else {
-          undo();
-        }
-      }
-
-      if (!isInput && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') {
-        e.preventDefault();
-        redo();
       }
     };
 
@@ -115,6 +161,7 @@ export const EditorWorkspace: React.FC = () => {
           VisualGalleryBlock,
           AudioNarrationBlock,
           FreeformCanvasBlock,
+          TableBlock,
         }}
         indicator={{
           success: '#FF5E3A', // Neo-vermilion drop line indicator!
@@ -131,6 +178,7 @@ export const EditorWorkspace: React.FC = () => {
           }}
           onOpenTemplates={() => setIsTemplatesOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenMetadata={() => setMetadataOpen(true)}
         />
         <div className="flex-1 flex overflow-hidden relative">
           <LeftRail />
@@ -158,6 +206,9 @@ export const EditorWorkspace: React.FC = () => {
           initialEngine={readerInitialEngine}
           initialRatio={readerInitialRatio}
         />
+        <CanvasShortcuts />
+        <CanvasContextMenu />
+        <MetadataModal isOpen={isMetadataOpen} onClose={() => setMetadataOpen(false)} />
         <SettingsModal
           isOpen={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}

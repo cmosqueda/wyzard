@@ -81,7 +81,23 @@ export function createDefaultChapterCraftJson(
   });
 }
 
-// Blank layout project factory
+// Completely empty page (no starter blocks) — used by the unthemed 'plain' design system
+export function createEmptyChapterCraftJson(): string {
+  return JSON.stringify({
+    ROOT: {
+      type: { resolvedName: 'CanvasContainer' },
+      isCanvas: true,
+      props: { backgroundColor: 'transparent', paddingY: '2rem', paddingX: '1.5rem' },
+      displayName: 'Page Flow Canvas',
+      custom: {},
+      hidden: false,
+      nodes: [],
+      linkedNodes: {},
+    },
+  });
+}
+
+// Blank layout project factory (unthemed, empty page — like Canva / other design tools)
 export function createBlankProject(
   title = 'Untitled Layout Project',
   author = 'Wyzard Author',
@@ -106,14 +122,12 @@ export function createBlankProject(
         slug: 'chapter-1',
         order: 1,
         backgroundColor: '#FFFFFF',
-        craftStateJson: createDefaultChapterCraftJson(
-          title,
-          'Start designing your layout by clicking any block to inspect its properties, or drag new components from the Left Rail.'
-        ),
+        craftStateJson: createEmptyChapterCraftJson(),
         createdAt: now,
         updatedAt: now,
       },
     ],
+    designSystem: 'plain',
     createdAt: now,
     updatedAt: now,
   };
@@ -220,6 +234,7 @@ export function createStarterProject(): BookProject {
       description: 'A mobile-first responsive editorial publication powered by Wyzard.',
     },
     activeChapterId: initialChapterId,
+    designSystem: 'wyzard',
     chapters: [
       {
         id: initialChapterId,
@@ -267,6 +282,8 @@ export function normalizeProjectChapters(project: BookProject): BookProject {
         craftStateJson:
           ch.id === 'ch-2'
             ? createChapter2StarterCraftJson()
+            : project.designSystem === 'plain'
+            ? createEmptyChapterCraftJson()
             : createDefaultChapterCraftJson(ch.title),
       };
     }

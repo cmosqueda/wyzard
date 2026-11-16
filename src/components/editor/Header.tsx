@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import { notify } from '../../store/toastStore';
 import { VIEWPORT_PRESETS, type ViewportMode } from '../../types/ast';
@@ -13,6 +13,9 @@ import {
   CheckCircle2,
   Loader2,
   BookOpen,
+  BookKey,
+  ChevronDown,
+  LayoutTemplate,
   ZoomIn,
   ZoomOut,
   Maximize2,
@@ -34,6 +37,7 @@ interface HeaderProps {
   onOpenWebReader?: () => void;
   onOpenTemplates?: () => void;
   onOpenSettings?: () => void;
+  onOpenMetadata?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -41,6 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenWebReader,
   onOpenTemplates,
   onOpenSettings,
+  onOpenMetadata,
 }) => {
   const {
     project,
@@ -60,10 +65,26 @@ export const Header: React.FC<HeaderProps> = ({
     isRightRailOpen,
     toggleRightRail,
     activeSidebarTab,
-    activeInspectorTab,
     themeMode,
     toggleThemeMode,
   } = useEditorStore();
+
+  const [isViewportMenuOpen, setIsViewportMenuOpen] = useState(false);
+  const viewportMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isViewportMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!viewportMenuRef.current?.contains(e.target as Node)) setIsViewportMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setIsViewportMenuOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [isViewportMenuOpen]);
 
   const getViewportIcon = (mode: ViewportMode) => {
     switch (mode) {
@@ -129,12 +150,6 @@ export const Header: React.FC<HeaderProps> = ({
             <span>Workspace</span>
           </button>
 
-          {/* Brand Badge */}
-          <div className="hidden md:flex items-center gap-1.5 bg-neo-ink text-white px-2.5 py-1.5 rounded-lg shadow-neo-sm shrink-0">
-            <BookOpen className="w-4 h-4 text-neo-yellow" strokeWidth={2.5} />
-            <span className="font-heading font-bold text-sm tracking-tight">WYZARD</span>
-          </div>
-
           {/* Editable Project Title */}
           <div className="flex flex-col min-w-0 max-w-[150px] sm:max-w-[220px] lg:max-w-[260px]">
             <input
@@ -151,38 +166,60 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </div>
 
-          {/* Templates Picker */}
-          <button
-            onClick={onOpenTemplates}
-            className="hidden xl:flex items-center gap-1.5 bg-white border-neo border-neo-ink px-2.5 py-1.5 rounded-lg shadow-neo-sm text-xs font-mono font-bold hover:bg-neo-bg transition-all shrink-0"
-            title="Switch or apply starter layout template"
-          >
-            <BookOpen className="w-3.5 h-3.5 text-neo-vermilion" strokeWidth={2.5} />
-            <span>Templates</span>
-          </button>
         </div>
 
-        {/* Center Zone: Screen Ratio / Viewport Switcher */}
-        <div className="flex items-center gap-1 bg-neo-bg p-1 border-neo border-neo-ink rounded-xl shadow-neo-sm overflow-x-auto max-w-full">
-          {(Object.keys(VIEWPORT_PRESETS) as ViewportMode[]).map((mode) => {
-            const config = VIEWPORT_PRESETS[mode];
-            const isActive = viewportMode === mode;
-            return (
-              <button
-                key={mode}
-                onClick={() => setViewportMode(mode)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-mono text-xs font-semibold transition-all shrink-0 ${
-                  isActive
-                    ? 'bg-neo-yellow text-neo-ink shadow-neo-sm border border-neo-ink font-bold'
-                    : 'text-gray-700 hover:text-neo-ink hover:bg-white/60'
-                }`}
-                title={`${config.name} (${config.width}×${config.height}px)`}
-              >
-                {getViewportIcon(mode)}
-                <span className="hidden md:inline">{getViewportShortLabel(mode)}</span>
-              </button>
-            );
-          })}
+        {/* Center Zone: Screen Ratio / Viewport Dropdown */}
+        <div ref={viewportMenuRef} className="relative">
+          <button
+            onClick={() => setIsViewportMenuOpen((o) => !o)}
+            className="flex items-center gap-2 bg-white text-neo-ink border-neo border-neo-ink px-3 py-1.5 rounded-lg shadow-neo-sm font-mono text-xs font-bold hover:bg-neo-bg transition-all"
+            aria-haspopup="listbox"
+            aria-expanded={isViewportMenuOpen}
+            title={`${VIEWPORT_PRESETS[viewportMode].name} (${VIEWPORT_PRESETS[viewportMode].width}×${VIEWPORT_PRESETS[viewportMode].height}px)`}
+          >
+            {getViewportIcon(viewportMode)}
+            <span>{getViewportShortLabel(viewportMode)}</span>
+            <span className="hidden sm:inline text-[10px] text-gray-500 font-normal">
+              {VIEWPORT_PRESETS[viewportMode].width}×{VIEWPORT_PRESETS[viewportMode].height}
+            </span>
+            <ChevronDown
+              className={`w-3.5 h-3.5 transition-transform ${isViewportMenuOpen ? 'rotate-180' : ''}`}
+              strokeWidth={2.5}
+            />
+          </button>
+          {isViewportMenuOpen && (
+            <div
+              role="listbox"
+              className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-56 bg-neo-surface border-neo border-neo-ink rounded-xl shadow-neo p-1 z-50"
+            >
+              {(Object.keys(VIEWPORT_PRESETS) as ViewportMode[]).map((mode) => {
+                const config = VIEWPORT_PRESETS[mode];
+                const isActive = viewportMode === mode;
+                return (
+                  <button
+                    key={mode}
+                    role="option"
+                    aria-selected={isActive}
+                    onClick={() => {
+                      setViewportMode(mode);
+                      setIsViewportMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg font-mono text-xs text-left transition-all ${
+                      isActive
+                        ? 'bg-neo-yellow text-neo-ink font-bold'
+                        : 'text-gray-700 hover:text-neo-ink hover:bg-neo-bg'
+                    }`}
+                  >
+                    {getViewportIcon(mode)}
+                    <span className="flex-1">{getViewportShortLabel(mode)}</span>
+                    <span className={`text-[10px] ${isActive ? 'text-neo-ink' : 'text-gray-500'}`}>
+                      {config.width}×{config.height}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Right Zone: Undo/Redo, Zoom, Reader, Theme & Settings */}
@@ -243,6 +280,16 @@ export const Header: React.FC<HeaderProps> = ({
               <Maximize2 className="w-3 h-3" strokeWidth={2} />
             </button>
           </div>
+
+          {/* Book Metadata */}
+          <button
+            onClick={onOpenMetadata}
+            className="flex items-center gap-1.5 bg-white text-neo-ink border-neo border-neo-ink px-3 py-1.5 rounded-lg font-mono text-xs font-bold shadow-neo-sm hover:bg-neo-yellow/40 active:translate-x-[1px] active:translate-y-[1px] transition-all"
+            title="Book metadata, credits & canvas design system"
+          >
+            <BookKey className="w-4 h-4 text-neo-vermilion" strokeWidth={2.5} />
+            <span className="hidden sm:inline">Metadata</span>
+          </button>
 
           {/* In-App HTML / Multi-Format Reader */}
           <button
@@ -311,6 +358,16 @@ export const Header: React.FC<HeaderProps> = ({
               ({activeSidebarTab})
             </span>
           </button>
+
+          {/* Templates Picker */}
+          <button
+            onClick={onOpenTemplates}
+            className="flex items-center gap-1.5 bg-white text-neo-ink border-neo border-neo-ink px-3 py-1 rounded-lg shadow-neo-sm text-xs font-mono font-bold hover:bg-neo-bg transition-all"
+            title="Switch or apply starter layout template"
+          >
+            <LayoutTemplate className="w-3.5 h-3.5 text-neo-vermilion" strokeWidth={2.5} />
+            <span>Templates</span>
+          </button>
         </div>
 
         {/* Center Dock: Sync Status + Hotkeys Hint */}
@@ -365,9 +422,6 @@ export const Header: React.FC<HeaderProps> = ({
               <SlidersHorizontal className="w-4 h-4 text-neo-ink" strokeWidth={2.5} />
             )}
             <span>Inspector</span>
-            <span className="hidden sm:inline text-[10px] uppercase opacity-75">
-              ({activeInspectorTab === 'project' ? 'meta' : 'block'})
-            </span>
           </button>
         </div>
       </div>

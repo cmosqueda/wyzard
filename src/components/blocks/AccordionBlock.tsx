@@ -1,3 +1,4 @@
+import { MathText } from '../ui/MathText';
 import React, { useState } from 'react';
 import { useNode, type UserComponent } from '@craftjs/core';
 import { ChevronDown, Bookmark, HelpCircle } from 'lucide-react';
@@ -119,18 +120,15 @@ export const AccordionBlock: UserComponent<AccordionBlockProps> = ({
       {/* Expandable Content Drawer */}
       {isOpen && (
         <div className="p-4 pt-3 border-t-neo border-neo-ink bg-neo-bg/40 animate-in fade-in slide-in-from-top-1 duration-150">
-          <div
-            contentEditable
-            suppressContentEditableWarning
-            onBlur={(e) => {
+          <MathText
+            value={content}
+            onChange={(v) =>
               setProp((p: AccordionBlockProps) => {
-                p.content = e.currentTarget.textContent || '';
-              });
-            }}
-            className="font-sans text-xs leading-relaxed text-gray-800 focus:outline-none"
-          >
-            {content}
-          </div>
+                p.content = v;
+              })
+            }
+            className="font-sans text-xs leading-relaxed text-gray-800"
+          />
 
           <div className="mt-3 pt-2 border-t border-gray-300 flex items-center justify-between text-[10px] font-mono text-gray-500">
             <span>Dual Target: Animated JS Drawer (Web) • &lt;details&gt; (EPUB)</span>

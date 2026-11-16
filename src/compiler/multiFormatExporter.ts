@@ -8,6 +8,8 @@ import {
   getWebRuntimeJs,
 } from './webCompiler';
 import { db } from '../db';
+import { googleFontStack, loadGoogleFont } from '../utils/googleFonts';
+import { getArtboardHeightRatio, getArtboardWidthPct } from '../utils/artboard';
 
 export type ScreenRatioKey = 'mobile' | 'tablet' | 'laptop' | 'comic' | 'square';
 
@@ -166,8 +168,10 @@ export function estimateNodeHeight(
 
     case 'FreeformCanvasBlock':
     case 'FreeformCanvas': {
-      const ratio = parseAspectRatioValue(p.aspectRatio || '16/9');
-      const rawH = contentWidth / ratio;
+      const rawH =
+        contentWidth *
+        (getArtboardWidthPct(p.artboardWidth) / 100) *
+        getArtboardHeightRatio(p.aspectRatio || '16/9', p.artboardHeight);
       const captionH = p.caption ? 28 : 0;
       return Math.min(usablePageHeight - 12, Math.ceil(rawH + captionH + 28));
     }
@@ -215,6 +219,13 @@ export function estimateNodeHeight(
         return Math.min(usablePageHeight - 12, Math.ceil(rows * cardH + 36));
       }
       return Math.min(usablePageHeight - 12, Math.ceil(contentWidth * 0.68 + 90));
+    }
+
+    case 'TableBlock':
+    case 'Table': {
+      const rowsArr: any[] = Array.isArray(p.rows) ? p.rows : [[]];
+      const captionH = p.caption ? 28 : 0;
+      return Math.min(usablePageHeight - 12, Math.ceil(rowsArr.length * 34 + captionH + 28));
     }
 
     case 'AudioNarrationBlock':
@@ -514,7 +525,7 @@ export function compilePaginatedPdfDocument(
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
   <style>
-    ${getWebPublicationStyles()}
+    ${getWebPublicationStyles(project.designSystem)}
 
     @page {
       size: ${preset.width}px ${preset.height}px;
@@ -723,7 +734,7 @@ export async function exportToHtmlZipPack(project: BookProject): Promise<void> {
   }
 
   // 2. Write shared stylesheet & interactive runtime JS
-  assetsFolder?.file('style.css', getWebPublicationStyles());
+  assetsFolder?.file('style.css', getWebPublicationStyles(project.designSystem));
   assetsFolder?.file('reader.js', getWebRuntimeJs());
   assetsFolder?.file(
     'credits.json',
@@ -994,13 +1005,43 @@ export async function renderPageGrabToCanvasDataUrl(
 
   ctx.scale(scale, scale);
 
+  // Canvas design system: 'plain' = blank neutral page, otherwise the Wyzard editorial look
+  const plain = project.designSystem === 'plain';
+  const T = plain
+    ? {
+        sans: 'Arial, Helvetica, sans-serif',
+        head: 'Arial, Helvetica, sans-serif',
+        mono: 'Arial, Helvetica, sans-serif',
+        ink: '#111111',
+        line: '#D1D5DB',
+        lw: 1,
+        accent: '#9CA3AF',
+        quoteBg: '#F3F4F6',
+        paper: '#F3F4F6',
+        box: '#F9FAFB',
+      }
+    : {
+        sans: '"Plus Jakarta Sans", sans-serif',
+        head: '"Space Grotesk", sans-serif',
+        mono: '"JetBrains Mono", monospace',
+        ink: '#141414',
+        line: '#141414',
+        lw: 2,
+        accent: '#FF5E3A',
+        quoteBg: '#FFF9DB',
+        paper: '#F4F1EA',
+        box: '#FAF9F6',
+      };
+
   // 1. Paper Background & Neo-Brutalist Comic Frame
   ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(0, 0, preset.width, preset.height);
 
-  ctx.strokeStyle = '#141414';
-  ctx.lineWidth = 4;
-  ctx.strokeRect(6, 6, preset.width - 12, preset.height - 12);
+  if (!plain) {
+    ctx.strokeStyle = T.line;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(6, 6, preset.width - 12, preset.height - 12);
+  }
 
   const padX = preset.paddingX;
   const padY = preset.paddingY;
@@ -1008,7 +1049,7 @@ export async function renderPageGrabToCanvasDataUrl(
 
   // 2. Top Folio Bar
   ctx.fillStyle = '#555555';
-  ctx.font = 'bold 10px "JetBrains Mono", monospace';
+  ctx.font = `bold 10px ${T.mono}`;
   ctx.textBaseline = 'top';
   ctx.fillText(
     (project.metadata.title || project.title).toUpperCase().slice(0, 38),
@@ -1019,7 +1060,7 @@ export async function renderPageGrabToCanvasDataUrl(
   const chapW = ctx.measureText(chapLabel).width;
   ctx.fillText(chapLabel, preset.width - padX - chapW, padY - 12);
 
-  ctx.strokeStyle = '#141414';
+  ctx.strokeStyle = T.line;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.moveTo(padX, padY + 4);
@@ -1041,33 +1082,43 @@ export async function renderPageGrabToCanvasDataUrl(
       case 'EditorialTypography': {
         const variant = p.variant || 'body';
         const text = String(p.htmlContent || p.text || '');
+        let fam: string | null = null;
+        if (typeof p.googleFont === 'string' && p.googleFont.trim()) {
+          fam = googleFontStack(p.googleFont);
+          loadGoogleFont(p.googleFont);
+          try {
+            await document.fonts.load(`16px "${p.googleFont.replace(/"/g, '')}"`);
+          } catch {
+            // fall back to the generic family if the web font can't load
+          }
+        }
         if (variant === 'h1') {
           ctx.fillStyle = p.color || '#141414';
-          ctx.font = 'bold 28px "Space Grotesk", sans-serif';
+          ctx.font = `bold 28px ${fam || T.head}`;
           curY = drawWrappedText(ctx, text, padX, curY, contentW, 34, 6) + 12;
         } else if (variant === 'h2') {
           ctx.fillStyle = p.color || '#141414';
-          ctx.font = 'bold 22px "Space Grotesk", sans-serif';
+          ctx.font = `bold 22px ${fam || T.head}`;
           curY = drawWrappedText(ctx, text, padX, curY, contentW, 28, 6) + 10;
         } else if (variant === 'h3') {
           ctx.fillStyle = p.color || '#141414';
-          ctx.font = 'bold 18px "Space Grotesk", sans-serif';
+          ctx.font = `bold 18px ${fam || T.head}`;
           curY = drawWrappedText(ctx, text, padX, curY, contentW, 24, 6) + 8;
         } else if (variant === 'pullquote') {
-          ctx.fillStyle = '#FFF9DB';
+          ctx.fillStyle = T.quoteBg;
           const estH = Math.min(availH, Math.max(54, item.estimatedHeight - 12));
           ctx.fillRect(padX, curY, contentW, estH);
-          ctx.fillStyle = '#FF5E3A';
+          ctx.fillStyle = T.accent;
           ctx.fillRect(padX, curY, 5, estH);
-          ctx.fillStyle = '#141414';
-          ctx.font = 'italic bold 17px "Space Grotesk", sans-serif';
+          ctx.fillStyle = T.ink;
+          ctx.font = `italic bold 17px ${fam || T.head}`;
           curY = drawWrappedText(ctx, `"${text}"`, padX + 16, curY + 12, contentW - 28, 23, 6) + 18;
         } else {
           ctx.fillStyle = p.color || '#222222';
           ctx.font =
             variant === 'lead'
-              ? '500 17px "Plus Jakarta Sans", sans-serif'
-              : '400 15px "Plus Jakarta Sans", sans-serif';
+              ? `500 17px ${fam || T.sans}`
+              : `400 15px ${fam || T.sans}`;
           curY =
             drawWrappedText(
               ctx,
@@ -1088,9 +1139,11 @@ export async function renderPageGrabToCanvasDataUrl(
         const boxH = Math.min(availH - (p.caption ? 24 : 8), Math.round(contentW / ratio));
         if (boxH > 40) {
           // Neo shadow
-          ctx.fillStyle = '#141414';
-          ctx.fillRect(padX + 4, curY + 4, contentW, boxH);
-          ctx.fillStyle = '#F4F1EA';
+          if (!plain) {
+            ctx.fillStyle = T.ink;
+            ctx.fillRect(padX + 4, curY + 4, contentW, boxH);
+          }
+          ctx.fillStyle = T.paper;
           ctx.fillRect(padX, curY, contentW, boxH);
 
           const img = await loadImageForCanvas(p.src || '');
@@ -1126,18 +1179,18 @@ export async function renderPageGrabToCanvasDataUrl(
             ctx.restore();
           } else {
             ctx.fillStyle = '#888';
-            ctx.font = 'bold 12px "JetBrains Mono", monospace';
+            ctx.font = `bold 12px ${T.mono}`;
             ctx.fillText(`[IMAGE: ${p.alt || 'Visual Plate'}]`, padX + 16, curY + boxH / 2 - 6);
           }
 
-          ctx.strokeStyle = '#141414';
-          ctx.lineWidth = 2;
+          ctx.strokeStyle = T.line;
+          ctx.lineWidth = T.lw;
           ctx.strokeRect(padX, curY, contentW, boxH);
           curY += boxH + 8;
 
           if (p.caption) {
             ctx.fillStyle = '#555555';
-            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.font = `11px ${T.mono}`;
             ctx.fillText(String(p.caption).slice(0, 75), padX, curY);
             curY += 18;
           }
@@ -1148,15 +1201,19 @@ export async function renderPageGrabToCanvasDataUrl(
 
       case 'FreeformCanvasBlock':
       case 'FreeformCanvas': {
-        const ratio = parseAspectRatioValue(p.aspectRatio || '16/9');
-        const boxH = Math.min(availH - (p.caption ? 24 : 8), Math.round(contentW / ratio));
+        const fbW = contentW * (getArtboardWidthPct(p.artboardWidth) / 100);
+        const fbX = padX + (contentW - fbW) / 2;
+        const boardH = getArtboardHeightRatio(p.aspectRatio || '16/9', p.artboardHeight);
+        const boxH = Math.min(availH - (p.caption ? 24 : 8), Math.round(fbW * boardH));
         if (boxH > 40) {
           const isTransparentBg = p.backgroundType === 'transparent';
           if (!isTransparentBg) {
-            ctx.fillStyle = '#141414';
-            ctx.fillRect(padX + 4, curY + 4, contentW, boxH);
-            ctx.fillStyle = p.backgroundColor || '#F4F1EA';
-            ctx.fillRect(padX, curY, contentW, boxH);
+            if (!plain) {
+              ctx.fillStyle = T.ink;
+              ctx.fillRect(fbX + 4, curY + 4, fbW, boxH);
+            }
+            ctx.fillStyle = p.backgroundColor || T.paper;
+            ctx.fillRect(fbX, curY, fbW, boxH);
           }
 
           if (p.backgroundType === 'image' && p.backgroundImage) {
@@ -1164,18 +1221,18 @@ export async function renderPageGrabToCanvasDataUrl(
             if (bgArtImg) {
               ctx.save();
               ctx.beginPath();
-              ctx.rect(padX, curY, contentW, boxH);
+              ctx.rect(fbX, curY, fbW, boxH);
               ctx.clip();
-              ctx.drawImage(bgArtImg, padX, curY, contentW, boxH);
+              ctx.drawImage(bgArtImg, fbX, curY, fbW, boxH);
               ctx.restore();
             }
           }
 
           const layers: any[] = (p.layers || []).filter((l: any) => !l.hidden);
           for (const layer of layers) {
-            const lx = padX + (layer.x / 100) * contentW;
+            const lx = fbX + (layer.x / 100) * fbW;
             const ly = curY + (layer.y / 100) * boxH;
-            const lw = (layer.width / 100) * contentW;
+            const lw = (layer.width / 100) * fbW;
             const lh = (layer.height / 100) * boxH;
 
             ctx.save();
@@ -1222,13 +1279,13 @@ export async function renderPageGrabToCanvasDataUrl(
                 ctx.fillRect(lx, ly, lw, lh);
               }
               if (layer.borderNeo) {
-                ctx.strokeStyle = '#141414';
-                ctx.lineWidth = 2;
+                ctx.strokeStyle = T.line;
+                ctx.lineWidth = T.lw;
                 ctx.strokeRect(lx, ly, lw, lh);
               }
               if (layer.text) {
                 ctx.fillStyle = layer.color || '#141414';
-                ctx.font = `bold ${layer.fontSize || 14}px "Space Grotesk", sans-serif`;
+                ctx.font = `bold ${layer.fontSize || 14}px ${T.head}`;
                 drawWrappedText(ctx, String(layer.text), lx + 6, ly + 8, Math.max(40, lw - 12), (layer.fontSize || 14) * 1.25, 4);
               }
             }
@@ -1236,16 +1293,16 @@ export async function renderPageGrabToCanvasDataUrl(
           }
 
           if (!isTransparentBg) {
-            ctx.strokeStyle = '#141414';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(padX, curY, contentW, boxH);
+            ctx.strokeStyle = T.line;
+            ctx.lineWidth = T.lw;
+            ctx.strokeRect(fbX, curY, fbW, boxH);
           }
           curY += boxH + 8;
 
           if (p.caption) {
             ctx.fillStyle = '#555555';
-            ctx.font = '11px "JetBrains Mono", monospace';
-            ctx.fillText(String(p.caption).slice(0, 75), padX, curY);
+            ctx.font = `11px ${T.mono}`;
+            ctx.fillText(String(p.caption).slice(0, 75), fbX, curY);
             curY += 18;
           }
           curY += 8;
@@ -1253,12 +1310,60 @@ export async function renderPageGrabToCanvasDataUrl(
         break;
       }
 
+      case 'TableBlock':
+      case 'Table': {
+        const grid: string[][] = (Array.isArray(p.rows) ? p.rows : []).map((r: any) =>
+          Array.isArray(r) ? r.map((c: any) => String(c ?? '')) : []
+        );
+        const cols = Math.max(1, ...grid.map((r) => r.length));
+        const rowH = 26;
+        const maxRows = Math.max(1, Math.floor((availH - 8) / rowH));
+        const shown = grid.slice(0, maxRows);
+        const widthsPct: number[] =
+          Array.isArray(p.columnWidths) && p.columnWidths.length === cols
+            ? p.columnWidths
+            : Array.from({ length: cols }, () => 100 / cols);
+        const widthTotal = widthsPct.reduce((a: number, b: number) => a + b, 0) || 100;
+        const headerRow = p.headerRow !== false;
+        shown.forEach((row, r) => {
+          let x = padX;
+          for (let c = 0; c < cols; c++) {
+            const cw = (widthsPct[c] / widthTotal) * contentW;
+            const isHead = (headerRow && r === 0) || (!!p.headerColumn && c === 0);
+            if (isHead) {
+              ctx.fillStyle = T.paper;
+              ctx.fillRect(x, curY + r * rowH, cw, rowH);
+            }
+            ctx.strokeStyle = T.line;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x, curY + r * rowH, cw, rowH);
+            ctx.fillStyle = T.ink;
+            ctx.font = `${isHead ? 'bold ' : ''}12px ${T.sans}`;
+            let label = (row[c] || '').replace(/\$/g, '');
+            while (label.length > 1 && ctx.measureText(label).width > cw - 12) label = label.slice(0, -2) + '…';
+            ctx.fillText(label, x + 6, curY + r * rowH + 7);
+            x += cw;
+          }
+        });
+        curY += shown.length * rowH + 8;
+        if (p.caption) {
+          ctx.fillStyle = '#555555';
+          ctx.font = `11px ${T.mono}`;
+          ctx.fillText(String(p.caption).slice(0, 75), padX, curY);
+          curY += 18;
+        }
+        curY += 8;
+        break;
+      }
+
       case 'HeroSpreadBlock':
       case 'MagazineHeroSpread': {
         const boxH = Math.min(availH - 12, 280);
         if (boxH > 60) {
-          ctx.fillStyle = '#141414';
-          ctx.fillRect(padX + 4, curY + 4, contentW, boxH);
+          if (!plain) {
+            ctx.fillStyle = T.ink;
+            ctx.fillRect(padX + 4, curY + 4, contentW, boxH);
+          }
           ctx.fillStyle = '#1E1E1E';
           ctx.fillRect(padX, curY, contentW, boxH);
 
@@ -1278,28 +1383,28 @@ export async function renderPageGrabToCanvasDataUrl(
 
           ctx.fillStyle = 'rgba(255,255,255,0.95)';
           ctx.fillRect(cardX, cardY, cardW, cardH);
-          ctx.strokeStyle = '#141414';
-          ctx.lineWidth = 2;
+          ctx.strokeStyle = T.line;
+          ctx.lineWidth = T.lw;
           ctx.strokeRect(cardX, cardY, cardW, cardH);
 
           let ty = cardY + 12;
           if (p.kicker) {
-            ctx.fillStyle = '#FF5E3A';
-            ctx.font = 'bold 10px "JetBrains Mono", monospace';
+            ctx.fillStyle = T.accent;
+            ctx.font = `bold 10px ${T.mono}`;
             ctx.fillText(String(p.kicker).toUpperCase(), cardX + 14, ty);
             ty += 16;
           }
-          ctx.fillStyle = '#141414';
-          ctx.font = 'bold 19px "Space Grotesk", sans-serif';
+          ctx.fillStyle = T.ink;
+          ctx.font = `bold 19px ${T.head}`;
           ty = drawWrappedText(ctx, String(p.title || ''), cardX + 14, ty, cardW - 28, 23, 3) + 4;
           if (p.subtitle && ty < cardY + cardH - 18) {
             ctx.fillStyle = '#444444';
-            ctx.font = '12px "Plus Jakarta Sans", sans-serif';
+            ctx.font = `12px ${T.sans}`;
             drawWrappedText(ctx, String(p.subtitle), cardX + 14, ty, cardW - 28, 16, 2);
           }
 
-          ctx.strokeStyle = '#141414';
-          ctx.lineWidth = 2;
+          ctx.strokeStyle = T.line;
+          ctx.lineWidth = T.lw;
           ctx.strokeRect(padX, curY, contentW, boxH);
           curY += boxH + 14;
         }
@@ -1309,26 +1414,30 @@ export async function renderPageGrabToCanvasDataUrl(
       case 'CalloutCardBlock':
       case 'CalloutCard': {
         const boxH = Math.min(availH - 10, Math.max(76, item.estimatedHeight - 10));
-        const bgMap: Record<string, string> = {
-          yellow: '#FFF9DB',
-          vermilion: '#FFEAE4',
-          teal: '#E6FBF5',
-          violet: '#F5EDFD',
-          ink: '#141414',
-        };
-        ctx.fillStyle = '#141414';
-        ctx.fillRect(padX + 3, curY + 3, contentW, boxH);
+        const bgMap: Record<string, string> = plain
+          ? { yellow: '#F3F4F6', vermilion: '#F3F4F6', teal: '#F3F4F6', violet: '#F3F4F6', ink: '#374151' }
+          : {
+              yellow: '#FFF9DB',
+              vermilion: '#FFEAE4',
+              teal: '#E6FBF5',
+              violet: '#F5EDFD',
+              ink: '#141414',
+            };
+        if (!plain) {
+          ctx.fillStyle = T.ink;
+          ctx.fillRect(padX + 3, curY + 3, contentW, boxH);
+        }
         ctx.fillStyle = bgMap[p.accent || 'yellow'] || '#FFF9DB';
         ctx.fillRect(padX, curY, contentW, boxH);
-        ctx.strokeStyle = '#141414';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = T.line;
+        ctx.lineWidth = T.lw;
         ctx.strokeRect(padX, curY, contentW, boxH);
 
         const fg = p.accent === 'ink' ? '#FFFFFF' : '#141414';
         ctx.fillStyle = fg;
-        ctx.font = 'bold 11px "JetBrains Mono", monospace';
+        ctx.font = `bold 11px ${T.mono}`;
         ctx.fillText(String(p.title || 'NOTE').toUpperCase(), padX + 14, curY + 12);
-        ctx.font = '13.5px "Plus Jakarta Sans", sans-serif';
+        ctx.font = `13.5px ${T.sans}`;
         drawWrappedText(ctx, String(p.content || ''), padX + 14, curY + 32, contentW - 28, 19, 4);
         curY += boxH + 14;
         break;
@@ -1336,8 +1445,8 @@ export async function renderPageGrabToCanvasDataUrl(
 
       case 'OrnamentDividerBlock':
       case 'OrnamentDivider': {
-        ctx.fillStyle = '#141414';
-        ctx.font = 'bold 14px "JetBrains Mono", monospace';
+        ctx.fillStyle = T.ink;
+        ctx.font = `bold 14px ${T.mono}`;
         const orn = '✦   ✦   ✦';
         const ow = ctx.measureText(orn).width;
         ctx.fillText(orn, padX + (contentW - ow) / 2, curY + 12);
@@ -1348,10 +1457,10 @@ export async function renderPageGrabToCanvasDataUrl(
       default: {
         // Fallback summary box for interactive blocks (Accordion, Gallery, Audio, Split)
         const boxH = Math.min(availH - 10, Math.max(72, Math.min(180, item.estimatedHeight - 12)));
-        ctx.fillStyle = '#FAF9F6';
+        ctx.fillStyle = T.box;
         ctx.fillRect(padX, curY, contentW, boxH);
-        ctx.strokeStyle = '#141414';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = T.line;
+        ctx.lineWidth = T.lw;
         ctx.strokeRect(padX, curY, contentW, boxH);
 
         const label =
@@ -1359,8 +1468,8 @@ export async function renderPageGrabToCanvasDataUrl(
           p.trackTitle ||
           p.caption ||
           node.type.replace(/Block$/, '').toUpperCase();
-        ctx.fillStyle = '#141414';
-        ctx.font = 'bold 13px "Space Grotesk", sans-serif';
+        ctx.fillStyle = T.ink;
+        ctx.font = `bold 13px ${T.head}`;
         ctx.fillText(String(label).slice(0, 55), padX + 14, curY + 14);
 
         const sub =
@@ -1370,7 +1479,7 @@ export async function renderPageGrabToCanvasDataUrl(
             ? `${node.children.length}-Column Adaptive Grid Layout`
             : 'Interactive Module');
         ctx.fillStyle = '#555555';
-        ctx.font = '12.5px "Plus Jakarta Sans", sans-serif';
+        ctx.font = `12.5px ${T.sans}`;
         drawWrappedText(ctx, String(sub), padX + 14, curY + 36, contentW - 28, 18, 4);
         curY += boxH + 12;
         break;
@@ -1388,7 +1497,7 @@ export async function renderPageGrabToCanvasDataUrl(
   ctx.stroke();
 
   ctx.fillStyle = '#666666';
-  ctx.font = 'bold 10px "JetBrains Mono", monospace';
+  ctx.font = `bold 10px ${T.mono}`;
   ctx.fillText(preset.shortLabel.toUpperCase(), padX, footY);
   const pgText = `PAGE ${page.pageNumber} / ${totalPages}`;
   const pgW = ctx.measureText(pgText).width;

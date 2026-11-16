@@ -1,7 +1,9 @@
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
-import type { BookProject, Chapter } from '../types/ast';
+import type { BookProject, Chapter, CanvasDesignSystem } from '../types/ast';
 import { parseCraftState, type ParsedBlockNode } from './astParser';
+import { getArtboardHeightRatio } from '../utils/artboard';
+import { extractMath, renderMathInText, unescapeHtml } from '../utils/math';
 
 /**
  * Escapes characters for strict XML / XHTML compliance.
@@ -18,6 +20,76 @@ function escapeXml(unsafe: string): string {
 /**
  * Converts a parsed AST node into strict XHTML5 with progressive fallbacks.
  */
+/**
+ * Rich-text HTML from the editor → a safe, well-formed XHTML subset: bold / italic / underline /
+ * highlight (from inline styles or tags), links (http, mailto, tel, #anchor) and line breaks.
+ * Everything else is dropped and all text is escaped.
+ */
+function inlineXhtml(html: string): string {
+  const out: string[] = [];
+  const spanStack: string[][] = []; // closing tags to emit for each open <span>
+  const safeHref = (raw: string) => (/^(https?:|mailto:|tel:|#)/i.test(raw.trim()) ? raw.trim() : '');
+
+  html.split(/(<[^>]*>)/g).forEach((part) => {
+    if (!part) return;
+    if (!part.startsWith('<')) {
+      out.push(escapeXml(unescapeHtml(part)));
+      return;
+    }
+    const m = /^<(\/?)([a-z0-9]+)([^>]*?)(\/?)>$/i.exec(part);
+    if (!m) return;
+    const closing = m[1] === '/';
+    const name = m[2].toLowerCase();
+    const attrs = m[3] || '';
+
+    if (name === 'br') {
+      if (!closing) out.push('<br/>');
+    } else if (name === 'b' || name === 'strong') {
+      out.push(closing ? '</strong>' : '<strong>');
+    } else if (name === 'i' || name === 'em') {
+      out.push(closing ? '</em>' : '<em>');
+    } else if (name === 'u') {
+      out.push(closing ? '</u>' : '<u>');
+    } else if (name === 'mark') {
+      out.push(closing ? '</mark>' : '<mark>');
+    } else if (name === 'a') {
+      if (closing) {
+        out.push('</a>');
+      } else {
+        const href = /href="([^"]*)"/i.exec(attrs)?.[1];
+        out.push(href && safeHref(unescapeHtml(href)) ? `<a href="${escapeXml(safeHref(unescapeHtml(href)))}">` : '<a>');
+      }
+    } else if (name === 'span') {
+      if (closing) {
+        (spanStack.pop() || []).forEach((t) => out.push(t));
+      } else {
+        const style = /style="([^"]*)"/i.exec(attrs)?.[1] || '';
+        const opens: string[] = [];
+        const closes: string[] = [];
+        const wrap = (open: string, close: string) => {
+          opens.push(open);
+          closes.unshift(close);
+        };
+        if (/font-weight:\s*(bold|[6-9]00)/i.test(style)) wrap('<strong>', '</strong>');
+        if (/font-style:\s*italic/i.test(style)) wrap('<em>', '</em>');
+        if (/text-decoration[^;]*underline/i.test(style)) wrap('<u>', '</u>');
+        const bg = /background-color:\s*([^;]+)/i.exec(style)?.[1]?.replace(/\s/g, '').toLowerCase();
+        if (bg && bg !== 'transparent' && bg !== 'rgba(0,0,0,0)' && bg !== 'initial') wrap('<mark>', '</mark>');
+        opens.forEach((t) => out.push(t));
+        spanStack.push(closes);
+      }
+    }
+    // any other tag is dropped
+  });
+  while (spanStack.length) (spanStack.pop() || []).forEach((t) => out.push(t));
+  return out.join('');
+}
+
+/** Plain text → XHTML-safe text with `$…$` LaTeX rendered as MathML. */
+function epubText(value: string): string {
+  return renderMathInText(value, 'mathml');
+}
+
 function renderEpubNode(node: ParsedBlockNode): string {
   const p = node.props;
 
@@ -25,7 +97,8 @@ function renderEpubNode(node: ParsedBlockNode): string {
     case 'TypographyBlock':
     case 'EditorialTypography': {
       const variant = p.variant || 'body';
-      const text = escapeXml(p.htmlContent || p.text || '');
+      const mathParts = extractMath(p.htmlContent || p.text || '', 'mathml');
+      const text = mathParts.restore(inlineXhtml(mathParts.text));
       const keepTogether = p.keepTogetherOnPageTurn ? 'page-break-avoid' : '';
       const dropCap = p.dropCap && variant === 'body' ? 'drop-cap' : '';
 
@@ -110,7 +183,7 @@ function renderEpubNode(node: ParsedBlockNode): string {
     case 'CalloutCardBlock':
     case 'CalloutCard': {
       const title = escapeXml(p.title || '');
-      const content = escapeXml(p.content || '');
+      const content = epubText(p.content || '');
       return `
         <aside class="epub-callout page-break-avoid">
           <div class="callout-header"><strong>${title}</strong></div>
@@ -128,7 +201,7 @@ function renderEpubNode(node: ParsedBlockNode): string {
     case 'InteractiveAccordion': {
       const title = escapeXml(p.title || '');
       const badge = escapeXml(p.badge || 'NOTE');
-      const content = escapeXml(p.content || '');
+      const content = epubText(p.content || '');
 
       return `
         <details class="epub-accordion page-break-avoid">
@@ -184,6 +257,35 @@ function renderEpubNode(node: ParsedBlockNode): string {
       `;
     }
 
+    case 'TableBlock':
+    case 'Table': {
+      const grid: string[][] = (Array.isArray(p.rows) && p.rows.length ? p.rows : [['']]).map((r: any) =>
+        Array.isArray(r) ? r.map((c: any) => String(c ?? '')) : []
+      );
+      const cols = Math.max(1, ...grid.map((r) => r.length));
+      const headerRow = p.headerRow !== false;
+      const headerColumn = !!p.headerColumn;
+      const aligns: string[] = Array.isArray(p.columnAlign) ? p.columnAlign : [];
+      const body = grid
+        .map((row, r) => {
+          const cells = Array.from({ length: cols }, (_, c) => {
+            const isHead = (headerRow && r === 0) || (headerColumn && c === 0);
+            const tag = isHead ? 'th' : 'td';
+            const align = aligns[c] && aligns[c] !== 'left' ? ` style="text-align:${aligns[c]}"` : '';
+            return `<${tag}${align}>${epubText(row[c] || '')}</${tag}>`;
+          }).join('');
+          return `<tr>${cells}</tr>`;
+        })
+        .join('\n');
+      const caption = p.caption ? `<figcaption class="epub-caption">${escapeXml(String(p.caption))}</figcaption>` : '';
+      return `
+        <figure class="epub-table-figure page-break-avoid">
+          <table class="epub-table"><tbody>${body}</tbody></table>
+          ${caption}
+        </figure>
+      `;
+    }
+
     case 'AudioNarrationBlock':
     case 'AudioNarration': {
       const src = escapeXml(p.audioSrc || '');
@@ -205,14 +307,7 @@ function renderEpubNode(node: ParsedBlockNode): string {
       const caption = escapeXml(p.caption || '');
       const layers: any[] = p.layers || [];
 
-      const viewH =
-        ratio === '1/1'
-          ? 1000
-          : ratio === '4/5'
-          ? 1250
-          : ratio === '4/3'
-          ? 750
-          : 562;
+      const viewH = Math.round(1000 * getArtboardHeightRatio(ratio, p.artboardHeight));
 
       const svgNodes = layers
         .filter((layer) => !layer.hidden)
@@ -319,8 +414,8 @@ function buildChapterXhtml(chapter: Chapter, project: BookProject): string {
 /**
  * Returns safe, relative-unit CSS for EPUB 3 reading systems.
  */
-function getEpubStyles(): string {
-  return `
+function getEpubStyles(designSystem?: CanvasDesignSystem): string {
+  const base = `
 @charset "utf-8";
 
 body {
@@ -422,6 +517,16 @@ body {
   margin-bottom: 1.2em;
 }
 
+/* Inline formatting & links */
+mark { background: #fff3a3; color: inherit; }
+a { color: #1d4ed8; text-decoration: underline; }
+
+/* Tables */
+.epub-table-figure { margin: 1.5em 0; }
+.epub-table { width: 100%; border-collapse: collapse; font-size: 0.95em; }
+.epub-table th, .epub-table td { border: 1px solid #777; padding: 0.4em 0.5em; text-align: left; vertical-align: top; }
+.epub-table th { background: #eee; font-weight: bold; }
+
 /* Aside & Callout */
 .epub-callout {
   border: 2px solid #111;
@@ -469,6 +574,17 @@ body {
   background: #fcfcfc;
 }
 `;
+  const plainOverrides = `
+/* ===== Plain design system overrides ===== */
+body { color: #111; }
+.chapter-heading { border-bottom: 1px solid #ccc; }
+.epub-pullquote { border-left: 3px solid #ccc; }
+.epub-hero-spread { border: 1px solid #ccc; background: #fff; }
+.epub-callout { border: 1px solid #ccc; background: #fff; }
+.epub-audio-card { border: 1px solid #ccc; background: #fff; }
+.epub-footnotes { border-top: 1px solid #ccc; }
+`;
+  return designSystem === 'plain' ? base + plainOverrides : base;
 }
 
 /**
@@ -490,10 +606,10 @@ export async function exportToEpub(project: BookProject): Promise<void> {
   zip.file('META-INF/container.xml', containerXml);
 
   // 3. OEBPS/css/style.css
-  zip.file('OEBPS/css/style.css', getEpubStyles());
+  zip.file('OEBPS/css/style.css', getEpubStyles(project.designSystem));
 
   // 4. Chapter XHTML documents
-  const chapterEntries: { id: string; filename: string; title: string }[] = [];
+  const chapterEntries: { id: string; filename: string; title: string; hasMath?: boolean }[] = [];
   project.chapters.forEach((chapter, idx) => {
     const filename = `chapter-${idx + 1}.xhtml`;
     const chapterXml = buildChapterXhtml(chapter, project);
@@ -502,6 +618,7 @@ export async function exportToEpub(project: BookProject): Promise<void> {
       id: `chapter-${idx + 1}`,
       filename,
       title: chapter.title,
+      hasMath: chapterXml.includes('<math'),
     });
   });
 
@@ -594,7 +711,7 @@ export async function exportToEpub(project: BookProject): Promise<void> {
     ${chapterEntries
       .map(
         (c) => `
-    <item id="${c.id}" href="chapters/${c.filename}" media-type="application/xhtml+xml"/>
+    <item id="${c.id}" href="chapters/${c.filename}" media-type="application/xhtml+xml"${c.hasMath ? ' properties="mathml"' : ''}/>
     `
       )
       .join('')}

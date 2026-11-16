@@ -11,6 +11,7 @@ import { HotspotPinboardBlock } from '../../blocks/HotspotPinboardBlock';
 import { VisualGalleryBlock } from '../../blocks/VisualGalleryBlock';
 import { AudioNarrationBlock } from '../../blocks/AudioNarrationBlock';
 import { FreeformCanvasBlock } from '../../blocks/FreeformCanvasBlock';
+import { TableBlock } from '../../blocks/TableBlock';
 import {
   Type,
   Image as ImageIcon,
@@ -25,6 +26,7 @@ import {
   GalleryHorizontal,
   Volume2,
   Palette,
+  Table as TableIcon,
 } from 'lucide-react';
 
 export const BlockPalette: React.FC = () => {
@@ -207,6 +209,24 @@ export const BlockPalette: React.FC = () => {
               <div className="flex flex-col">
                 <span className="font-heading font-bold text-xs text-neo-ink">Fixed Visual Canvas</span>
                 <span className="text-[10px] font-mono text-gray-600">Canva-style 2D freeform artboard</span>
+              </div>
+            </div>
+
+            {/* Table (Notion-style, editable rows & columns) */}
+            <div
+              ref={(ref) => {
+                if (ref) {
+                  connectors.create(ref, <TableBlock />);
+                }
+              }}
+              className="group flex items-center gap-3 p-3 bg-white border-neo border-neo-ink rounded-lg shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] active:translate-x-[1px] active:translate-y-[1px] cursor-grab active:cursor-grabbing transition-all"
+            >
+              <div className="p-2 bg-neo-teal/20 rounded border border-neo-ink">
+                <TableIcon className="w-5 h-5 text-neo-teal" strokeWidth={2.5} />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-heading font-bold text-xs text-neo-ink">Table</span>
+                <span className="text-[10px] font-mono text-gray-500">Editable rows, columns &amp; LaTeX cells</span>
               </div>
             </div>
 

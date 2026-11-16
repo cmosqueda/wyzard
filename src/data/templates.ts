@@ -29,6 +29,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
         description: 'An art-directed exploration of typography, user agency, and responsive editorial form.',
       },
       activeChapterId: 'ch-mag-1',
+      designSystem: 'wyzard',
       chapters: [
         {
           id: 'ch-mag-1',
@@ -206,6 +207,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
         description: 'An annotated scientific visual guide designed for smartphones in the wild and desktop study.',
       },
       activeChapterId: 'ch-guide-1',
+      designSystem: 'wyzard',
       chapters: [
         {
           id: 'ch-guide-1',
@@ -369,6 +371,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
         description: 'An illustrated read-along fable of mechanical wonder and forgotten gears.',
       },
       activeChapterId: 'ch-story-1',
+      designSystem: 'wyzard',
       chapters: [
         {
           id: 'ch-story-1',

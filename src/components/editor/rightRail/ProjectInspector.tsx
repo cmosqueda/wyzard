@@ -8,7 +8,9 @@ export const ProjectInspector: React.FC = () => {
     updateProjectMetadata,
     addAssetAttribution,
     removeAssetAttribution,
+    setDesignSystem,
   } = useEditorStore();
+  const designSystem = project.designSystem === 'plain' ? 'plain' : 'wyzard';
 
   const [newTitle, setNewTitle] = useState('');
   const [newCreator, setNewCreator] = useState('');
@@ -39,6 +41,34 @@ export const ProjectInspector: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full p-4 overflow-y-auto text-xs font-sans gap-4">
+      <div>
+        <label className="font-heading font-semibold block mb-1 text-neo-ink uppercase tracking-wider text-[11px]">
+          Canvas Design System
+        </label>
+        <div className="grid grid-cols-2 gap-1">
+          {(
+            [
+              { id: 'plain', label: 'Plain (Blank)' },
+              { id: 'wyzard', label: 'Wyzard Editorial' },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => designSystem !== opt.id && setDesignSystem(opt.id)}
+              className={`py-1.5 text-center font-mono border-neo border-neo-ink rounded transition-all ${
+                designSystem === opt.id ? 'bg-neo-yellow font-bold shadow-neo-sm' : 'bg-white hover:bg-neo-bg'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] font-mono text-gray-500 leading-snug mt-1">
+          Styles the page canvas only. Plain is an unthemed blank page; the app theme is unaffected.
+        </p>
+      </div>
+
       <div>
         <label className="font-heading font-semibold block mb-1 text-neo-ink uppercase tracking-wider text-[11px]">
           Book Title

@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import type { BookProject, Chapter, BookMetadata, ViewportMode, AssetAttribution } from '../types/ast';
+import type { BookProject, Chapter, BookMetadata, ViewportMode, AssetAttribution, CanvasDesignSystem } from '../types/ast';
+import { VIEWPORT_PRESETS } from '../types/ast';
 import {
   db,
   createStarterProject,
   createBlankProject,
   createDefaultChapterCraftJson,
+  createEmptyChapterCraftJson,
   normalizeProjectChapters,
 } from '../db';
 import { syncProjectToLocalFs, deleteProjectFromLocalFs } from '../db/localFs';
@@ -44,6 +46,41 @@ const getInitialThemeMode = (): WyzardThemeMode => {
   return 'light';
 };
 
+// ---- Session persistence: an accidental refresh returns to the same project, chapter and view ----
+const SESSION_KEY = 'wyzard-session';
+
+interface SavedSession {
+  workspaceOpen: boolean;
+  projectId?: string;
+  chapterId?: string;
+  viewportMode?: ViewportMode;
+  zoomLevel?: number;
+  sidebarTab?: 'spine' | 'blocks' | 'assets';
+}
+
+function readSession(): SavedSession | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as SavedSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSession(session: SavedSession): void {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+// Only true when the last session had a project open, so the workspace screen never flashes on refresh
+const initialSession = typeof window !== 'undefined' ? readSession() : null;
+const shouldRestoreSession = !!(initialSession && initialSession.workspaceOpen === false && initialSession.projectId);
+
 const getInitialPanelOpenState = (): boolean => {
   if (typeof window === 'undefined') return true;
   return window.innerWidth >= 1024;
@@ -54,6 +91,7 @@ interface EditorState {
   themeMode: WyzardThemeMode;
   isWorkspaceOpen: boolean;
   isTransitioning: boolean;
+  isRestoring: boolean;
   transitionLabel: string;
   isLeftRailOpen: boolean;
   isRightRailOpen: boolean;
@@ -62,6 +100,7 @@ interface EditorState {
   selectedNodeId: string | null;
   activeSidebarTab: 'spine' | 'blocks' | 'assets';
   activeInspectorTab: 'block' | 'page' | 'project';
+  isMetadataOpen: boolean;
   isSaving: boolean;
   lastSavedAt: number | null;
   history: string[]; // snapshot serialized project states for Undo
@@ -78,6 +117,7 @@ interface EditorState {
   setRightRailOpen: (open: boolean) => void;
 
   // Workspace & Project Actions
+  restoreSession: () => Promise<void>;
   openWorkspace: () => Promise<void>;
   openProject: (id: string) => Promise<void>;
   createNewProject: (customProject?: BookProject) => Promise<void>;
@@ -91,6 +131,7 @@ interface EditorState {
   setSelectedNodeId: (nodeId: string | null) => void;
   setActiveSidebarTab: (tab: 'spine' | 'blocks' | 'assets') => void;
   setActiveInspectorTab: (tab: 'block' | 'page' | 'project') => void;
+  setMetadataOpen: (open: boolean) => void;
   addAssetAttribution: (attr: Omit<AssetAttribution, 'id' | 'addedAt'>) => void;
   removeAssetAttribution: (id: string) => void;
   setActiveChapter: (chapterId: string) => void;
@@ -100,6 +141,7 @@ interface EditorState {
   reorderChapters: (startIndex: number, endIndex: number) => void;
   updateChapterCraftState: (chapterId: string, craftJson: string) => void;
   updateProjectMetadata: (metadata: Partial<BookMetadata>) => void;
+  setDesignSystem: (designSystem: CanvasDesignSystem) => void;
   saveProjectToDb: () => Promise<void>;
   loadProjectFromDb: (id?: string) => Promise<void>;
   undo: () => void;
@@ -113,6 +155,7 @@ export const useEditorStore = create<EditorState>()(
     themeMode: getInitialThemeMode(),
     isWorkspaceOpen: true,
     isTransitioning: false,
+    isRestoring: shouldRestoreSession,
     transitionLabel: '',
     isLeftRailOpen: getInitialPanelOpenState(),
     isRightRailOpen: getInitialPanelOpenState(),
@@ -121,6 +164,7 @@ export const useEditorStore = create<EditorState>()(
     selectedNodeId: null,
     activeSidebarTab: 'blocks',
     activeInspectorTab: 'block',
+    isMetadataOpen: false,
     isSaving: false,
     lastSavedAt: null,
     history: [],
@@ -192,6 +236,49 @@ export const useEditorStore = create<EditorState>()(
           state.isLeftRailOpen = false;
         }
       });
+    },
+
+    restoreSession: async () => {
+      const session = readSession();
+      if (!shouldRestoreSession || !session?.projectId) {
+        set((state) => {
+          state.isRestoring = false;
+        });
+        sessionReady = true;
+        return;
+      }
+      try {
+        const loaded = await db.projects.get(session.projectId);
+        if (!loaded) throw new Error('Saved project no longer exists');
+        const normalized = normalizeProjectChapters(loaded);
+        const chapterId = normalized.chapters.some((c) => c.id === session.chapterId)
+          ? (session.chapterId as string)
+          : normalized.activeChapterId;
+        const restored: BookProject = { ...normalized, activeChapterId: chapterId };
+        set((state) => {
+          state.project = restored;
+          state.lastSavedAt = restored.updatedAt;
+          state.selectedNodeId = null;
+          state.history = [JSON.stringify(restored)];
+          state.historyPointer = 0;
+          state.isWorkspaceOpen = false;
+          if (session.viewportMode && session.viewportMode in VIEWPORT_PRESETS) {
+            state.viewportMode = session.viewportMode;
+          }
+          if (typeof session.zoomLevel === 'number') {
+            state.zoomLevel = Math.min(250, Math.max(25, session.zoomLevel));
+          }
+          if (session.sidebarTab) state.activeSidebarTab = session.sidebarTab;
+          state.isRestoring = false;
+        });
+      } catch (err) {
+        console.warn('Could not restore the previous session:', err);
+        set((state) => {
+          state.isRestoring = false;
+        });
+      } finally {
+        sessionReady = true;
+      }
     },
 
     openWorkspace: async () => {
@@ -448,6 +535,12 @@ export const useEditorStore = create<EditorState>()(
       });
     },
 
+    setMetadataOpen: (open) => {
+      set((state) => {
+        state.isMetadataOpen = open;
+      });
+    },
+
     setActiveInspectorTab: (tab) => {
       set((state) => {
         state.activeInspectorTab = tab;
@@ -483,7 +576,10 @@ export const useEditorStore = create<EditorState>()(
           title: chapterTitle,
           slug: `chapter-${order}`,
           order,
-          craftStateJson: createDefaultChapterCraftJson(chapterTitle),
+          craftStateJson:
+            state.project.designSystem === 'plain'
+              ? createEmptyChapterCraftJson()
+              : createDefaultChapterCraftJson(chapterTitle),
           backgroundColor: '#FFFFFF',
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -583,6 +679,20 @@ export const useEditorStore = create<EditorState>()(
         state.project.updatedAt = Date.now();
       });
       get().saveProjectToDb();
+    },
+
+    setDesignSystem: (designSystem) => {
+      get().pushHistorySnapshot();
+      set((state) => {
+        state.project.designSystem = designSystem;
+        state.project.updatedAt = Date.now();
+      });
+      get().saveProjectToDb();
+      notify({
+        type: 'info',
+        title: `Canvas Design System: ${designSystem === 'plain' ? 'Plain (blank)' : 'Wyzard Editorial'}`,
+        duration: 1800,
+      });
     },
 
     addAssetAttribution: (attr) => {
@@ -727,3 +837,18 @@ export const useEditorStore = create<EditorState>()(
     },
   }))
 );
+
+// Persist where the user is (after the restore step, so boot defaults never overwrite a saved session)
+let sessionReady = false;
+
+useEditorStore.subscribe((state) => {
+  if (!sessionReady) return;
+  writeSession({
+    workspaceOpen: state.isWorkspaceOpen,
+    projectId: state.isWorkspaceOpen ? undefined : state.project.id,
+    chapterId: state.project.activeChapterId,
+    viewportMode: state.viewportMode,
+    zoomLevel: state.zoomLevel,
+    sidebarTab: state.activeSidebarTab,
+  });
+});

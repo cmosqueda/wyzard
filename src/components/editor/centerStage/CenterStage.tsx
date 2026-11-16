@@ -2,6 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useEditorStore } from '../../../store/editorStore';
 import { VIEWPORT_PRESETS } from '../../../types/ast';
 import { CanvasFrame } from './CanvasFrame';
+import { StageDockContext } from './StageDock';
+
+// The Craft.js frame has no props; memoising it keeps pan / zoom from re-rendering every block
+const StaticCanvasFrame = React.memo(CanvasFrame);
 import {
   Wifi,
   BatteryMedium,
@@ -28,6 +32,7 @@ export const CenterStage: React.FC = () => {
   const preset = VIEWPORT_PRESETS[viewportMode] || VIEWPORT_PRESETS.mobile;
 
   const isMobile = viewportMode === 'mobile';
+  const isPlain = project.designSystem === 'plain';
 
   const activeChapterIndex = project.chapters.findIndex(
     (c) => c.id === project.activeChapterId
@@ -52,6 +57,124 @@ export const CenterStage: React.FC = () => {
   } | null>(null);
 
   const stageRef = useRef<HTMLElement | null>(null);
+
+  // Docks for block tools (e.g. the Fixed Visual Canvas toolbar). They sit outside the scaled device frame,
+  // so they stay full-width and readable in every viewport (including Mobile).
+  const [topDock, setTopDock] = useState<HTMLDivElement | null>(null);
+  const [drawerDock, setDrawerDock] = useState<HTMLDivElement | null>(null);
+  const [bottomDock, setBottomDock] = useState<HTMLDivElement | null>(null);
+  const dockValue = React.useMemo(
+    () => ({ top: topDock, drawer: drawerDock, bottom: bottomDock }),
+    [topDock, drawerDock, bottomDock]
+  );
+
+  // Collapsible stage tools panel (anchored to the left edge of the stage, beside the Tools sidebar)
+  const [isStageToolsOpen, setIsStageToolsOpen] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('wyzard-stage-tools-open');
+      if (saved === '1' || saved === '0') return saved === '1';
+    } catch {
+      // ignore storage errors
+    }
+    return typeof window !== 'undefined' ? window.innerWidth >= 1280 : true;
+  });
+  const toggleStageTools = () =>
+    setIsStageToolsOpen((open) => {
+      try {
+        localStorage.setItem('wyzard-stage-tools-open', open ? '0' : '1');
+      } catch {
+        // ignore storage errors
+      }
+      return !open;
+    });
+
+  // Right-button (mouse 2) drag pans the whole canvas; a plain right-click still opens the context menu
+  const rightPanRef = useRef<{ x: number; y: number; startPanX: number; startPanY: number; moved: boolean } | null>(null);
+  const suppressContextMenuRef = useRef(false);
+  const [isRightPanning, setIsRightPanning] = useState(false);
+
+  // During a drag the pan is written straight to the DOM (one write per animation frame) and React state
+  // is updated once on release, so dragging never re-renders the stage or the page blocks.
+  const panLayerRef = useRef<HTMLDivElement | null>(null);
+  const scaleRef = useRef(1);
+  const livePanRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const rafRef = useRef<number | null>(null);
+
+  const paintPan = (x: number, y: number) => {
+    livePanRef.current = { x, y };
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const { x: px, y: py } = livePanRef.current;
+      if (panLayerRef.current) {
+        panLayerRef.current.style.transform = `translate3d(${px}px, ${py}px, 0) scale(${scaleRef.current})`;
+      }
+      if (stageRef.current && !stageRef.current.dataset.designSystem?.includes('plain')) {
+        stageRef.current.style.backgroundPosition = `${px}px ${py}px`;
+      }
+    });
+  };
+
+  // Auto-scroll the page while a block (or asset) is being dragged near the top / bottom edge of the stage.
+  // Native drag-and-drop never scrolls on its own, so reordering long pages needed manual scrolling.
+  useEffect(() => {
+    let raf = 0;
+    let active = false;
+    let x = 0;
+    let y = 0;
+    let lastOver = 0;
+
+    const tick = () => {
+      const el = stageRef.current;
+      // dragover keeps firing while a drag is alive; if it stops (cursor left the window) stop scrolling
+      if (!active || !el || performance.now() - lastOver > 300) {
+        active = false;
+        raf = 0;
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      if (x >= r.left && x <= r.right) {
+        const zone = Math.min(110, r.height * 0.25);
+        let dir = 0;
+        let depth = 0;
+        if (y < r.top + zone && y > r.top - 60) {
+          dir = -1;
+          depth = (r.top + zone - y) / zone;
+        } else if (y > r.bottom - zone && y < r.bottom + 60) {
+          dir = 1;
+          depth = (y - (r.bottom - zone)) / zone;
+        }
+        if (dir !== 0) {
+          // Ease in: slow near the edge of the zone, fast at the very edge
+          el.scrollTop += dir * Math.round(4 + Math.min(1, depth) ** 2 * 26);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+
+    const onDragOver = (e: DragEvent) => {
+      x = e.clientX;
+      y = e.clientY;
+      lastOver = performance.now();
+      if (!active) {
+        active = true;
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    const stop = () => {
+      active = false;
+    };
+
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('dragend', stop);
+    window.addEventListener('drop', stop);
+    return () => {
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('dragend', stop);
+      window.removeEventListener('drop', stop);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
 
   // Track stage container width so wide viewports (Tablet/Laptop/Comic/Square)
   // automatically scale to fit on mobile and tablet screens without horizontal clipping
@@ -174,6 +297,56 @@ export const CenterStage: React.FC = () => {
 
   const canPanEverywhere = isPanMode || isSpacePressed;
 
+  const handlePointerDownCapture = (e: React.PointerEvent<HTMLElement>) => {
+    if (e.button !== 2) return;
+    if ((e.target as HTMLElement).closest('[data-stage-panel="true"]')) return;
+    const state = { x: e.clientX, y: e.clientY, startPanX: pan.x, startPanY: pan.y, moved: false };
+    rightPanRef.current = state;
+    livePanRef.current = { x: pan.x, y: pan.y };
+    suppressContextMenuRef.current = false;
+
+    const onMove = (ev: PointerEvent) => {
+      if (!state.moved && Math.hypot(ev.clientX - state.x, ev.clientY - state.y) < 5) return;
+      if (!state.moved) {
+        state.moved = true;
+        setIsRightPanning(true);
+      }
+      paintPan(state.startPanX + (ev.clientX - state.x), state.startPanY + (ev.clientY - state.y));
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      rightPanRef.current = null;
+      if (state.moved) {
+        if (rafRef.current !== null) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        }
+        setPan({ ...livePanRef.current });
+      }
+      setIsRightPanning(false);
+      if (state.moved) {
+        // Windows fires `contextmenu` right after the button is released: swallow it once
+        suppressContextMenuRef.current = true;
+        setTimeout(() => {
+          suppressContextMenuRef.current = false;
+        }, 150);
+      }
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+
+  const handleContextMenuCapture = (e: React.MouseEvent<HTMLElement>) => {
+    if (suppressContextMenuRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      suppressContextMenuRef.current = false;
+    }
+  };
+
   const handlePointerDown = (e: React.PointerEvent<HTMLElement>) => {
     const target = e.target as HTMLElement;
     const isInteractiveControl = Boolean(
@@ -185,10 +358,15 @@ export const CenterStage: React.FC = () => {
       target.closest('[data-canvas-drag-handle="true"]')
     );
 
-    // Only intercept pointer for panning when Pan Mode / Spacebar is active, middle-click, or dragging the device top bezel
-    // so normal touch/scroll on the page works effortlessly!
-    if (canPanEverywhere || e.button === 1 || isDragHandle) {
+    // The plain canvas has no bezel, so dragging empty stage space around the page pans instead
+    const isEmptyStageSpace =
+      isPlain && e.button === 0 && target.getAttribute('data-stage-bg') === 'true';
+
+    // Only intercept pointer for panning when Pan Mode / Spacebar is active, middle-click, dragging the device
+    // top bezel, or (plain) empty stage background, so normal touch/scroll on the page works effortlessly!
+    if (canPanEverywhere || e.button === 1 || isDragHandle || isEmptyStageSpace) {
       e.preventDefault();
+      livePanRef.current = { x: pan.x, y: pan.y };
       setIsDraggingCanvas(true);
       dragStartRef.current = {
         pointerX: e.clientX,
@@ -204,14 +382,16 @@ export const CenterStage: React.FC = () => {
     if (!isDraggingCanvas || !dragStartRef.current) return;
     const dx = e.clientX - dragStartRef.current.pointerX;
     const dy = e.clientY - dragStartRef.current.pointerY;
-    setPan({
-      x: dragStartRef.current.startPanX + dx,
-      y: dragStartRef.current.startPanY + dy,
-    });
+    paintPan(dragStartRef.current.startPanX + dx, dragStartRef.current.startPanY + dy);
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLElement>) => {
     if (isDraggingCanvas) {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      if (dragStartRef.current) setPan({ ...livePanRef.current });
       setIsDraggingCanvas(false);
       dragStartRef.current = null;
       (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
@@ -228,140 +408,173 @@ export const CenterStage: React.FC = () => {
   const autoFitScale = Math.min(1, availableW / preset.width);
   const effectiveScale = Number(((zoomLevel / 100) * autoFitScale).toFixed(3));
 
+  scaleRef.current = effectiveScale;
+  const shownPan = isDraggingCanvas || isRightPanning ? livePanRef.current : pan;
   const isPannedOrZoomed = pan.x !== 0 || pan.y !== 0 || zoomLevel !== 100;
 
   return (
+    <StageDockContext.Provider value={dockValue}>
+    <div className="flex-1 flex flex-col min-w-0 h-full min-h-0">
+      <div
+        ref={setTopDock}
+        data-stage-ui="true"
+        data-stage-panel="true"
+        className="shrink-0 z-20 bg-neo-surface border-b-neo border-neo-ink px-2 sm:px-3 py-2 empty:hidden"
+      />
     <main
       ref={stageRef}
       data-stage-bg="true"
+      data-design-system={isPlain ? 'plain' : 'wyzard'}
+      onPointerDownCapture={handlePointerDownCapture}
+      onContextMenuCapture={handleContextMenuCapture}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
-      style={{
-        backgroundImage:
-          'radial-gradient(rgba(20, 20, 20, 0.16) 1.25px, transparent 1.25px)',
-        backgroundSize: '20px 20px',
-        backgroundPosition: `${pan.x}px ${pan.y}px`,
-      }}
-      className={`flex-1 bg-neo-bg h-full min-h-0 overflow-y-auto overflow-x-auto relative flex flex-col items-center py-3 sm:py-5 px-2 sm:px-4 select-none min-w-0 ${
-        isDraggingCanvas
+      style={
+        isPlain
+          ? undefined
+          : {
+              backgroundImage:
+                'radial-gradient(rgba(20, 20, 20, 0.16) 1.25px, transparent 1.25px)',
+              backgroundSize: '20px 20px',
+              backgroundPosition: `${shownPan.x}px ${shownPan.y}px`,
+            }
+      }
+      className={`flex-1 bg-neo-bg min-h-0 overflow-y-auto overflow-x-auto relative flex flex-col items-center py-3 sm:py-5 px-2 sm:px-4 select-none min-w-0 ${
+        isDraggingCanvas || isRightPanning
           ? 'cursor-grabbing'
           : canPanEverywhere
           ? 'cursor-grab'
           : 'cursor-default'
       }`}
     >
-      {/* Floating Top Stage Bar: Tool Mode, Active Chapter, Viewport Info & Mobile Zoom */}
+      {/* Collapsible stage tools panel, anchored beside the left Tools sidebar */}
       <div
-        data-stage-ui="true"
-        className="z-20 mb-3 flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 max-w-full"
+        data-stage-panel="true"
+        className="sticky top-0 self-start w-0 h-0 z-30 -ml-2 sm:-ml-4 -mt-3 sm:-mt-5 mb-3 sm:mb-5 overflow-visible"
       >
-        {/* Select vs Pan/Drag Canvas Mode Toggle */}
-        <div className="flex items-center bg-white border-neo border-neo-ink p-0.5 rounded-full shadow-neo-sm text-[11px] sm:text-xs font-mono">
-          <button
-            onClick={() => setIsPanMode(false)}
-            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-full font-bold transition-all ${
-              !canPanEverywhere
-                ? 'bg-neo-yellow text-neo-ink border border-neo-ink'
-                : 'text-gray-600 hover:text-neo-ink'
-            }`}
-            title="Select & Edit Blocks"
-          >
-            <MousePointer className="w-3 h-3 sm:w-3.5 sm:h-3.5" strokeWidth={2.5} />
-            <span>Edit</span>
-          </button>
-          <button
-            onClick={() => setIsPanMode(true)}
-            className={`flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-full font-bold transition-all ${
-              canPanEverywhere
-                ? 'bg-neo-vermilion text-white border border-neo-ink'
-                : 'text-gray-600 hover:text-neo-ink'
-            }`}
-            title="Pan / Drag Canvas Space (or drag background / hold Space)"
-          >
-            <Hand className="w-3 h-3 sm:w-3.5 sm:h-3.5" strokeWidth={2.5} />
-            <span>Pan</span>
-          </button>
-        </div>
+        <div data-stage-ui="true" data-stage-panel="true" className="absolute left-0 top-3 flex items-start">
+          {isStageToolsOpen && (
+            <div className="w-52 max-h-[calc(100vh-9rem)] overflow-y-auto bg-white border-neo border-l-0 border-neo-ink rounded-r-xl shadow-neo-sm p-2.5 flex flex-col gap-3 text-[11px] font-mono animate-in fade-in slide-in-from-left-2 duration-150">
+              {/* Mode */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[9px] uppercase tracking-wider text-gray-500 font-bold">Mode</span>
+                <div className="grid grid-cols-2 gap-1">
+                  <button
+                    onClick={() => setIsPanMode(false)}
+                    className={`flex items-center justify-center gap-1 py-1.5 rounded-lg font-bold border border-neo-ink transition-all ${
+                      !canPanEverywhere ? 'bg-neo-yellow text-neo-ink' : 'bg-white text-gray-600 hover:bg-neo-bg'
+                    }`}
+                    title="Select & edit blocks"
+                  >
+                    <MousePointer className="w-3.5 h-3.5" strokeWidth={2.5} />
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => setIsPanMode(true)}
+                    className={`flex items-center justify-center gap-1 py-1.5 rounded-lg font-bold border border-neo-ink transition-all ${
+                      canPanEverywhere ? 'bg-neo-vermilion text-white' : 'bg-white text-gray-600 hover:bg-neo-bg'
+                    }`}
+                    title="Pan / drag the canvas (or hold Space, or drag with the right mouse button)"
+                  >
+                    <Hand className="w-3.5 h-3.5" strokeWidth={2.5} />
+                    Pan
+                  </button>
+                </div>
+              </div>
 
-        {/* Active Spine Chapter Indicator & Quick Switcher */}
-        {activeChapter && (
-          <div className="flex items-center gap-1 bg-white border-neo border-neo-ink px-2 py-1 rounded-full shadow-neo-sm text-[11px] sm:text-xs font-mono">
-            <button
-              disabled={activeChapterIndex <= 0}
-              onClick={() =>
-                activeChapterIndex > 0 &&
-                setActiveChapter(project.chapters[activeChapterIndex - 1].id)
-              }
-              className="p-0.5 rounded hover:bg-neo-bg disabled:opacity-30"
-              title="Previous Spine Chapter"
-            >
-              <ChevronLeft className="w-3.5 h-3.5 text-neo-ink" strokeWidth={2.5} />
-            </button>
-            <FileText className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-neo-vermilion shrink-0" strokeWidth={2.5} />
-            <span className="font-bold text-neo-ink max-w-[120px] sm:max-w-[200px] truncate">
-              {String(activeChapterIndex + 1).padStart(2, '0')}. {activeChapter.title}
-            </span>
-            <button
-              disabled={activeChapterIndex >= project.chapters.length - 1}
-              onClick={() =>
-                activeChapterIndex < project.chapters.length - 1 &&
-                setActiveChapter(project.chapters[activeChapterIndex + 1].id)
-              }
-              className="p-0.5 rounded hover:bg-neo-bg disabled:opacity-30"
-              title="Next Spine Chapter"
-            >
-              <ChevronRight className="w-3.5 h-3.5 text-neo-ink" strokeWidth={2.5} />
-            </button>
-          </div>
-        )}
+              {/* Chapter */}
+              {activeChapter && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] uppercase tracking-wider text-gray-500 font-bold">Chapter</span>
+                  <div className="flex items-center gap-1 border border-neo-ink rounded-lg px-1 py-1">
+                    <button
+                      disabled={activeChapterIndex <= 0}
+                      onClick={() => activeChapterIndex > 0 && setActiveChapter(project.chapters[activeChapterIndex - 1].id)}
+                      className="p-0.5 rounded hover:bg-neo-bg disabled:opacity-30"
+                      title="Previous chapter"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5 text-neo-ink" strokeWidth={2.5} />
+                    </button>
+                    <FileText className="w-3 h-3 text-neo-vermilion shrink-0" strokeWidth={2.5} />
+                    <span className="flex-1 font-bold text-neo-ink truncate" title={activeChapter.title}>
+                      {String(activeChapterIndex + 1).padStart(2, '0')}. {activeChapter.title}
+                    </span>
+                    <button
+                      disabled={activeChapterIndex >= project.chapters.length - 1}
+                      onClick={() =>
+                        activeChapterIndex < project.chapters.length - 1 &&
+                        setActiveChapter(project.chapters[activeChapterIndex + 1].id)
+                      }
+                      className="p-0.5 rounded hover:bg-neo-bg disabled:opacity-30"
+                      title="Next chapter"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5 text-neo-ink" strokeWidth={2.5} />
+                    </button>
+                  </div>
+                </div>
+              )}
 
-        {/* Viewport Dimension Indicator */}
-        <div className="hidden sm:flex items-center gap-1.5 bg-white border-neo border-neo-ink px-2.5 py-1 rounded-full shadow-neo-sm text-[11px] font-mono">
-          <span className="w-2 h-2 rounded-full bg-neo-yellow" />
-          <span className="font-bold text-neo-ink">{preset.name}</span>
-          <span className="text-gray-400">•</span>
-          <span className="text-gray-600">
-            {preset.width}×{preset.height}px
-          </span>
-          {autoFitScale < 0.99 && (
-            <span className="text-[10px] bg-neo-teal/25 text-neo-ink px-1.5 py-0.2 rounded border border-neo-ink font-bold">
-              Fit {Math.round(effectiveScale * 100)}%
-            </span>
+              {/* Viewport */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[9px] uppercase tracking-wider text-gray-500 font-bold">Viewport</span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="w-2 h-2 rounded-full bg-neo-yellow shrink-0" />
+                  <span className="font-bold text-neo-ink">{preset.name}</span>
+                  <span className="text-gray-500">
+                    {preset.width}×{preset.height}px
+                  </span>
+                  {autoFitScale < 0.99 && (
+                    <span className="text-[10px] bg-neo-teal/25 text-neo-ink px-1.5 rounded border border-neo-ink font-bold">
+                      Fit {Math.round(effectiveScale * 100)}%
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Zoom */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[9px] uppercase tracking-wider text-gray-500 font-bold">Zoom</span>
+                <div className="flex items-center justify-between border border-neo-ink rounded-lg px-1.5 py-1">
+                  <button onClick={() => setZoomLevel(zoomLevel - 10)} className="p-0.5 hover:text-neo-vermilion" title="Zoom out (Ctrl + -)">
+                    <ZoomOut className="w-3.5 h-3.5" strokeWidth={2.5} />
+                  </button>
+                  <span className="font-bold">{Math.round(effectiveScale * 100)}%</span>
+                  <button onClick={() => setZoomLevel(zoomLevel + 10)} className="p-0.5 hover:text-neo-vermilion" title="Zoom in (Ctrl + +)">
+                    <ZoomIn className="w-3.5 h-3.5" strokeWidth={2.5} />
+                  </button>
+                </div>
+                <button
+                  onClick={handleResetView}
+                  disabled={!isPannedOrZoomed}
+                  className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-neo-ink font-bold bg-neo-ink text-white hover:bg-neo-vermilion disabled:opacity-40 disabled:hover:bg-neo-ink transition-colors"
+                  title="Center the canvas and reset zoom"
+                >
+                  <RotateCcw className="w-3 h-3" strokeWidth={2.5} />
+                  Center
+                </button>
+              </div>
+
+              <p className="text-[9px] leading-snug text-gray-500">
+                Right-drag, Space+drag or Alt+arrows to pan • Ctrl+scroll to zoom
+              </p>
+            </div>
           )}
-        </div>
 
-        {/* Compact Zoom Controls for Mobile / Tablet */}
-        <div className="flex xl:hidden items-center gap-1 bg-white border-neo border-neo-ink px-2 py-0.5 rounded-full shadow-neo-sm text-[11px] font-mono">
           <button
-            onClick={() => setZoomLevel(zoomLevel - 10)}
-            className="p-0.5 hover:text-neo-vermilion"
-            title="Zoom Out"
+            onClick={toggleStageTools}
+            className="mt-2 w-6 h-14 flex items-center justify-center bg-white border-neo border-l-0 border-neo-ink rounded-r-lg shadow-neo-sm text-neo-ink hover:bg-neo-yellow transition-colors"
+            title={isStageToolsOpen ? 'Collapse canvas tools' : 'Open canvas tools (mode, chapter, zoom)'}
+            aria-expanded={isStageToolsOpen}
           >
-            <ZoomOut className="w-3 h-3" strokeWidth={2.5} />
-          </button>
-          <span className="font-bold">{Math.round(effectiveScale * 100)}%</span>
-          <button
-            onClick={() => setZoomLevel(zoomLevel + 10)}
-            className="p-0.5 hover:text-neo-vermilion"
-            title="Zoom In"
-          >
-            <ZoomIn className="w-3 h-3" strokeWidth={2.5} />
+            {isStageToolsOpen ? (
+              <ChevronLeft className="w-4 h-4" strokeWidth={3} />
+            ) : (
+              <ChevronRight className="w-4 h-4" strokeWidth={3} />
+            )}
           </button>
         </div>
-
-        {/* Reset Pan/Zoom Button */}
-        {isPannedOrZoomed && (
-          <button
-            onClick={handleResetView}
-            className="flex items-center gap-1 bg-neo-ink text-white border-neo border-neo-ink px-2.5 py-1 rounded-full shadow-neo-sm text-[11px] font-mono font-bold hover:bg-neo-vermilion transition-colors"
-            title="Center canvas and reset zoom"
-          >
-            <RotateCcw className="w-3 h-3" strokeWidth={2.5} />
-            <span>Center</span>
-          </button>
-        )}
       </div>
 
       {/* Draggable & Responsively Scaled Device Viewport Frame */}
@@ -370,25 +583,32 @@ export const CenterStage: React.FC = () => {
         className="flex-1 w-full flex justify-center items-start pb-16"
       >
         <div
+          ref={panLayerRef}
           style={{
-            transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${effectiveScale})`,
+            transform: `translate3d(${shownPan.x}px, ${shownPan.y}px, 0) scale(${effectiveScale})`,
             transformOrigin: 'top center',
+            willChange: isDraggingCanvas || isRightPanning ? 'transform' : undefined,
           }}
           className={
-            isDraggingCanvas
+            isDraggingCanvas || isRightPanning
               ? 'transition-none'
               : 'transition-transform duration-150'
           }
         >
           <div
-            className="bg-white border-neo-thick border-neo-ink shadow-neo-lg rounded-2xl overflow-hidden flex flex-col relative"
+            data-design-system={isPlain ? 'plain' : 'wyzard'}
+            className={`bg-white overflow-hidden flex flex-col relative ${
+              isPlain
+                ? 'shadow-[0_1px_3px_rgba(0,0,0,0.18),0_4px_14px_rgba(0,0,0,0.10)]'
+                : 'border-neo-thick border-neo-ink shadow-neo-lg rounded-2xl'
+            }`}
             style={{
               width: `${preset.width}px`,
               minHeight: `${preset.height}px`,
             }}
           >
-            {/* Draggable Device Bezel / Top Handle Bar */}
-            {isMobile ? (
+            {/* Draggable Device Bezel / Top Handle Bar (Wyzard design system only; plain page is a bare sheet) */}
+            {isPlain ? null : isMobile ? (
               <div
                 data-canvas-drag-handle="true"
                 title="Drag bar to move canvas"
@@ -432,11 +652,25 @@ export const CenterStage: React.FC = () => {
                 canPanEverywhere ? 'pointer-events-none' : ''
               }`}
             >
-              <CanvasFrame />
+              <StaticCanvasFrame />
             </div>
           </div>
         </div>
       </div>
     </main>
+      <div
+        ref={setDrawerDock}
+        data-stage-ui="true"
+        data-stage-panel="true"
+        className="shrink-0 z-20 bg-neo-surface border-t-neo border-neo-ink px-2 sm:px-3 py-2 max-h-[42vh] overflow-y-auto empty:hidden"
+      />
+      <div
+        ref={setBottomDock}
+        data-stage-ui="true"
+        data-stage-panel="true"
+        className="shrink-0 z-20 bg-neo-surface border-t-neo border-neo-ink px-2 sm:px-3 py-2 empty:hidden"
+      />
+    </div>
+    </StageDockContext.Provider>
   );
 };
