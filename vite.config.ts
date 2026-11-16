@@ -4,6 +4,8 @@ import { fileURLToPath, URL } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 
+const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf-8'));
+
 const DEFAULT_STORAGE_DIR = path.resolve(process.cwd(), '.wyzard-data');
 const CONFIG_FILE = path.resolve(process.cwd(), '.wyzard-fs-config.json');
 
@@ -173,6 +175,9 @@ function wyzardLocalFsPlugin(): Plugin {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), wyzardLocalFsPlugin()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

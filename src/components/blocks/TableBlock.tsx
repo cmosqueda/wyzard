@@ -258,7 +258,7 @@ export const TableBlock: UserComponent<TableBlockProps> = ({
       ref={(ref) => {
         if (ref) connect(drag(ref));
       }}
-      className={`relative my-4 transition-all ${
+      className={`relative my-4 transition-all text-neo-ink ${
         selected
           ? 'ring-2 ring-neo-yellow ring-offset-2'
           : hovered

@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, createStarterProject, createBlankProject } from '../../db';
 import { WyzardLogo } from '../ui/WyzardLogo';
+import { CreditsModal } from './CreditsModal';
+import { AUTHOR_ALIAS, REPO_URL } from '../../data/credits';
 import { syncAllWithLocalFs } from '../../db/localFs';
 import { useEditorStore } from '../../store/editorStore';
 import { notify } from '../../store/toastStore';
@@ -45,6 +47,7 @@ export const WorkspaceManager: React.FC = () => {
 
   // New blank layout modal state
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
+  const [isCreditsOpen, setIsCreditsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newAuthor, setNewAuthor] = useState('');
@@ -452,6 +455,35 @@ export const WorkspaceManager: React.FC = () => {
           </div>
         </section>
       </main>
+
+      {/* Minimalist credit footer */}
+      <footer className="mt-auto border-t border-neo-ink/20 px-4 sm:px-6 py-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] font-mono text-gray-500">
+        <span>
+          Made by <strong className="text-neo-ink font-bold">{AUTHOR_ALIAS}</strong>
+        </span>
+        <span aria-hidden="true">·</span>
+        <a
+          href={REPO_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-neo-ink underline underline-offset-2 hover:text-neo-vermilion"
+          title="Wyzard on GitHub"
+        >
+          wyzard
+        </a>
+        <span aria-hidden="true">·</span>
+        <button
+          type="button"
+          onClick={() => setIsCreditsOpen(true)}
+          className="underline underline-offset-2 hover:text-neo-vermilion"
+        >
+          Free &amp; open source — credits
+        </button>
+        <span aria-hidden="true">·</span>
+        <span>v{__APP_VERSION__}</span>
+      </footer>
+
+      <CreditsModal isOpen={isCreditsOpen} onClose={() => setIsCreditsOpen(false)} />
 
       {/* Create New Blank Layout Modal */}
       {isNewModalOpen && (
