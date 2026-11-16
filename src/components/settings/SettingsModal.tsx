@@ -8,6 +8,10 @@ import {
   type LocalFsStatus,
 } from '../../db/localFs';
 import { saveAs } from 'file-saver';
+import { useBackupStore, formatAgo } from '../../store/backupStore';
+import { disconnectBackupFolder, syncAllWithFolder } from '../../db/fsAccess';
+import { downloadWorkspaceBackup, importWorkspaceBackup } from '../../db/backup';
+import { runConnectFolder, runReconnectFolder } from '../ui/BackupStatus';
 import { useEditorStore, type WyzardThemeMode } from '../../store/editorStore';
 import {
   X,
@@ -37,6 +41,7 @@ interface SettingsModalProps {
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const projects = useLiveQuery(() => db.projects.toArray(), []) || [];
   const assets = useLiveQuery(() => db.assets.toArray(), []) || [];
+  const backup = useBackupStore();
   const themeMode = useEditorStore((state) => state.themeMode);
   const setThemeMode = useEditorStore((state) => state.setThemeMode);
 
@@ -152,41 +157,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     showToast(`Cleaned up ${orphanedAssets.length} orphaned asset(s).`);
   };
 
-  const handleExportWorkspaceBackup = () => {
-    const payload = {
-      version: '0.2.0',
-      exportedAt: Date.now(),
-      projects,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: 'application/json;charset=utf-8',
-    });
-    saveAs(blob, `wyzard-workspace-backup-${new Date().toISOString().slice(0, 10)}.wyzard.json`);
-    showToast('Downloaded full workspace .wyzard.json backup.');
+  const handleExportWorkspaceBackup = async () => {
+    try {
+      const r = await downloadWorkspaceBackup();
+      showToast(`Downloaded backup: ${r.projects} project(s), ${r.assets} uploaded file(s).`);
+    } catch {
+      showToast('Could not create the backup file.');
+    }
   };
 
   const handleImportWorkspaceBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      const parsed = JSON.parse(text);
-      const importedProjects = Array.isArray(parsed.projects)
-        ? parsed.projects
-        : parsed.id && parsed.chapters
-        ? [parsed]
-        : [];
-
-      for (const proj of importedProjects) {
-        await db.projects.put(proj);
-      }
+      const r = await importWorkspaceBackup(file);
       await syncAllWithLocalFs();
       await refreshStorageStatus();
-      showToast(`Imported ${importedProjects.length} project(s) into workspace!`);
+      showToast(`Imported ${r.projects} project(s) and ${r.assets} uploaded file(s).`);
     } catch {
       showToast('Invalid .wyzard.json backup file.');
     }
     e.target.value = '';
+  };
+
+  const handleFolderSyncNow = async () => {
+    const r = await syncAllWithFolder();
+    showToast(`Folder synced — wrote ${r.written}, restored ${r.restored} project(s).`);
+  };
+
+  const handleFolderDisconnect = async () => {
+    await disconnectBackupFolder();
+    showToast('Backup folder disconnected. Files already in the folder were kept.');
   };
 
   return (
@@ -381,6 +382,146 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 {orphanedAssets.length > 0
                   ? `${orphanedAssets.length} orphaned blob(s)`
                   : 'All blobs linked to projects'}
+              </div>
+            </div>
+          </div>
+
+          {/* 1b. Backup folder (File System Access API) */}
+          <div className="bg-white border-neo border-neo-ink rounded-xl p-4 shadow-neo-sm flex flex-col gap-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <FolderSync className="w-5 h-5 text-neo-teal" strokeWidth={2.5} />
+                <div>
+                  <h4 className="font-heading font-bold text-sm text-neo-ink">Backup folder</h4>
+                  <p className="text-[11px] font-mono text-gray-500">
+                    Mirror every project and uploaded file into a folder you choose, so clearing browser data can't delete your work
+                  </p>
+                </div>
+              </div>
+              <span
+                className={`text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded border border-neo-ink ${
+                  backup.folderStatus === 'active'
+                    ? 'bg-neo-teal text-neo-ink'
+                    : backup.folderStatus === 'needs-permission'
+                    ? 'bg-neo-vermilion text-white'
+                    : 'bg-neo-yellow text-neo-ink'
+                }`}
+              >
+                {backup.folderStatus === 'active'
+                  ? `Active · ${backup.folderName}`
+                  : backup.folderStatus === 'needs-permission'
+                  ? 'Needs permission'
+                  : backup.folderStatus === 'unsupported'
+                  ? 'Not supported'
+                  : 'Not set up'}
+              </span>
+            </div>
+
+            {backup.folderStatus === 'unsupported' && (
+              <p className="text-[11px] font-mono text-gray-600 leading-snug">
+                Folder backup needs the File System Access API (Chrome, Edge, Brave, Opera, and other Chromium browsers).
+                In this browser, use <strong>Export All</strong> below and keep the file somewhere safe.
+              </p>
+            )}
+
+            {backup.folderStatus === 'none' && (
+              <div className="flex flex-col gap-2">
+                <p className="text-[11px] font-mono text-gray-600 leading-snug">
+                  Pick a folder (for example in Documents, or inside Dropbox / OneDrive / iCloud for cloud backup). Wyzard writes{' '}
+                  <code>projects/*.wyzard.json</code> and your uploaded files there after every change. After clearing browser
+                  data, choose the same folder again to restore everything.
+                </p>
+                <div>
+                  <button
+                    type="button"
+                    onClick={runConnectFolder}
+                    className="px-3 py-1.5 bg-neo-yellow text-neo-ink border-neo border-neo-ink rounded font-mono text-xs font-bold shadow-neo-sm hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all"
+                  >
+                    Choose backup folder…
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {backup.folderStatus === 'needs-permission' && (
+              <div className="flex flex-col gap-2">
+                <p className="text-[11px] font-mono text-gray-600 leading-snug">
+                  Browsers ask for permission again after a restart. Reconnect <strong>{backup.folderName}</strong> to resume
+                  automatic backups.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={runReconnectFolder}
+                    className="px-3 py-1.5 bg-neo-yellow text-neo-ink border-neo border-neo-ink rounded font-mono text-xs font-bold shadow-neo-sm"
+                  >
+                    Reconnect folder
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleFolderDisconnect}
+                    className="px-3 py-1.5 bg-white text-neo-ink border-neo border-neo-ink rounded font-mono text-xs font-bold"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {backup.folderStatus === 'active' && (
+              <div className="flex flex-col gap-2">
+                <p className="text-[11px] font-mono text-gray-600">
+                  Last synced <strong>{formatAgo(backup.lastFolderSyncAt)}</strong>. Changes are written about a second after
+                  you stop editing.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleFolderSyncNow}
+                    disabled={backup.isSyncing}
+                    className="px-3 py-1.5 bg-neo-ink text-white border-neo border-neo-ink rounded font-mono text-xs font-bold flex items-center gap-1 hover:bg-neo-vermilion transition-colors"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${backup.isSyncing ? 'animate-spin' : ''}`} />
+                    Sync now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={runConnectFolder}
+                    className="px-3 py-1.5 bg-white text-neo-ink border-neo border-neo-ink rounded font-mono text-xs font-bold"
+                  >
+                    Change folder…
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleFolderDisconnect}
+                    className="px-3 py-1.5 bg-white text-neo-ink border-neo border-neo-ink rounded font-mono text-xs font-bold"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {backup.syncError && (
+              <p className="text-[11px] font-mono text-red-600 font-bold">⚠ {backup.syncError}</p>
+            )}
+
+            <div className="pt-2 border-t border-gray-100 grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px] font-mono text-gray-600">
+              <div>
+                Last file backup: <strong className="text-neo-ink">{formatAgo(backup.lastBackupAt)}</strong>
+              </div>
+              <div>
+                Browser storage:{' '}
+                <strong className="text-neo-ink">
+                  {backup.storagePersisted === null
+                    ? 'unknown'
+                    : backup.storagePersisted
+                    ? 'protected from eviction'
+                    : 'can be evicted'}
+                </strong>
+              </div>
+              <div>
+                Reminders: <strong className="text-neo-ink">weekly while not backed up</strong>
               </div>
             </div>
           </div>

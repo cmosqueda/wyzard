@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import { notify } from '../../store/toastStore';
+import { BackupChip } from '../ui/BackupStatus';
 import { VIEWPORT_PRESETS, type ViewportMode } from '../../types/ast';
 import {
   Smartphone,
@@ -385,6 +386,8 @@ export const Header: React.FC<HeaderProps> = ({
               </>
             )}
           </div>
+
+          <BackupChip onOpenSettings={onOpenSettings} />
 
           <div className="hidden xl:flex items-center gap-1.5 text-[10px] text-gray-500">
             <Keyboard className="w-3.5 h-3.5 text-neo-vermilion" />

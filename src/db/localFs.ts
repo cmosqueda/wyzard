@@ -1,5 +1,6 @@
 import type { BookProject } from '../types/ast';
 import { db } from './index';
+import { mirrorProjectToFolder, removeProjectFromFolder } from './fsAccess';
 
 export interface LocalFsStatus {
   available: boolean;
@@ -41,6 +42,7 @@ export async function updateLocalFsDirectory(storageDir: string): Promise<string
 }
 
 export async function syncProjectToLocalFs(project: BookProject): Promise<boolean> {
+  mirrorProjectToFolder(project); // File System Access backup folder (no-op unless connected)
   try {
     const res = await fetch('/api/fs/project', {
       method: 'POST',
@@ -54,6 +56,7 @@ export async function syncProjectToLocalFs(project: BookProject): Promise<boolea
 }
 
 export async function deleteProjectFromLocalFs(id: string): Promise<boolean> {
+  void removeProjectFromFolder(id);
   try {
     const res = await fetch(`/api/fs/project?id=${encodeURIComponent(id)}`, {
       method: 'DELETE',

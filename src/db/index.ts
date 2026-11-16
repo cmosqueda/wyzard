@@ -11,15 +11,27 @@ export interface StoredAsset {
   createdAt: number;
 }
 
+export interface StoredKv {
+  key: string;
+  value: unknown;
+}
+
 export class WyzardDatabase extends Dexie {
   projects!: Table<BookProject, string>;
   assets!: Table<StoredAsset, string>;
+  kv!: Table<StoredKv, string>;
 
   constructor() {
     super('WyzardBookDatabase');
     this.version(1).stores({
       projects: 'id, title, updatedAt, createdAt',
       assets: 'id, projectId, name, mimeType, createdAt',
+    });
+    // v2: small key/value store (holds the chosen backup folder handle)
+    this.version(2).stores({
+      projects: 'id, title, updatedAt, createdAt',
+      assets: 'id, projectId, name, mimeType, createdAt',
+      kv: 'key',
     });
   }
 }

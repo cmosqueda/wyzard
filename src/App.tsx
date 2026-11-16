@@ -5,6 +5,8 @@ import { ToastContainer, WyzardErrorBoundary } from './components/ui/ToastContai
 import { useEditorStore } from './store/editorStore';
 import { Loader2 } from 'lucide-react';
 import { WyzardLogo } from './components/ui/WyzardLogo';
+import { initFolderSync } from './db/fsAccess';
+import { useBackupStore } from './store/backupStore';
 
 export const App: React.FC = () => {
   const isWorkspaceOpen = useEditorStore((state) => state.isWorkspaceOpen);
@@ -15,6 +17,22 @@ export const App: React.FC = () => {
   // Return to the same project / chapter / view after a refresh
   useEffect(() => {
     useEditorStore.getState().restoreSession();
+  }, []);
+
+  // Backup folder (File System Access) + best-effort request for non-evictable browser storage
+  useEffect(() => {
+    initFolderSync();
+    (async () => {
+      try {
+        if (navigator.storage?.persisted) {
+          let persisted = await navigator.storage.persisted();
+          if (!persisted && navigator.storage.persist) persisted = await navigator.storage.persist();
+          useBackupStore.getState().setStoragePersisted(persisted);
+        }
+      } catch {
+        // storage API unavailable
+      }
+    })();
   }, []);
 
   // Make sure the latest edits are written when the tab is hidden, closed or refreshed

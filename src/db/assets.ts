@@ -1,5 +1,46 @@
 import { db, type StoredAsset } from './index';
 import { notify } from '../store/toastStore';
+import type { BookProject } from '../types/ast';
+
+/**
+ * Uploaded files are referenced by object URLs, which die when the page reloads. Every URL we hand out
+ * carries the asset id in its fragment (`blob:…#wzasset=<id>`; fragments are ignored when the URL is
+ * fetched) so the real file can be found again in IndexedDB and re-linked when a project is opened.
+ */
+const ASSET_TAG = '#wzasset=';
+const ASSET_URL_RE = /blob:[^"\\\s]*?#wzasset=([A-Za-z0-9_-]+)/g;
+
+function tagUrl(objectUrl: string, assetId: string): string {
+  return `${objectUrl}${ASSET_TAG}${assetId}`;
+}
+
+/** Asset ids referenced anywhere inside a project (or any JSON-able value). */
+export function collectAssetIds(value: unknown): string[] {
+  const ids = new Set<string>();
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  for (const m of text.matchAll(ASSET_URL_RE)) ids.add(m[1]);
+  return Array.from(ids);
+}
+
+/**
+ * Replaces stale `blob:` URLs of uploaded assets with fresh ones created from the files stored in
+ * IndexedDB. Safe to call on every project load.
+ */
+export async function rehydrateProjectAssets(project: BookProject): Promise<BookProject> {
+  const json = JSON.stringify(project);
+  const ids = collectAssetIds(json);
+  if (ids.length === 0) return project;
+
+  const fresh = new Map<string, string>();
+  for (const id of ids) {
+    const url = await getAssetUrl(id);
+    if (url) fresh.set(id, url);
+  }
+  if (fresh.size === 0) return project;
+
+  const next = json.replace(ASSET_URL_RE, (whole, id: string) => fresh.get(id) ?? whole);
+  return next === json ? project : (JSON.parse(next) as BookProject);
+}
 
 // Cache for Object URLs created from IndexedDB Blobs
 const blobUrlCache = new Map<string, string>();
@@ -39,7 +80,7 @@ export async function saveAsset(projectId: string, file: File): Promise<string> 
   };
 
   await db.assets.put(storedAsset);
-  const url = URL.createObjectURL(file);
+  const url = tagUrl(URL.createObjectURL(file), assetId);
   blobUrlCache.set(assetId, url);
   notify({
     type: 'success',
@@ -61,7 +102,7 @@ export async function getAssetUrl(assetId: string): Promise<string | null> {
   const asset = await db.assets.get(assetId);
   if (!asset) return null;
 
-  const url = URL.createObjectURL(asset.data);
+  const url = tagUrl(URL.createObjectURL(asset.data), assetId);
   blobUrlCache.set(assetId, url);
   return url;
 }

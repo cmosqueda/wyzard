@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, createStarterProject, createBlankProject } from '../../db';
 import { WyzardLogo } from '../ui/WyzardLogo';
 import { CreditsModal } from './CreditsModal';
+import { BackupReminder } from '../ui/BackupStatus';
 import { AUTHOR_ALIAS, REPO_URL } from '../../data/credits';
 import { syncAllWithLocalFs } from '../../db/localFs';
 import { useEditorStore } from '../../store/editorStore';
@@ -204,6 +205,7 @@ export const WorkspaceManager: React.FC = () => {
 
       {/* Main Content Container */}
       <main className="max-w-6xl w-full mx-auto px-3 sm:px-6 py-5 sm:py-8 flex-1 flex flex-col gap-8 sm:gap-10">
+        <BackupReminder projectCount={(projects || []).length} onOpenSettings={() => setIsSettingsOpen(true)} />
         {/* Section 1: Saved Layouts (Workspace Projects) */}
         <section>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">

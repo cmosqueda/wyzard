@@ -11,6 +11,7 @@ import {
   normalizeProjectChapters,
 } from '../db';
 import { syncProjectToLocalFs, deleteProjectFromLocalFs } from '../db/localFs';
+import { rehydrateProjectAssets } from '../db/assets';
 import { notify } from './toastStore';
 
 export type WyzardThemeMode = 'light' | 'dark' | 'system';
@@ -250,7 +251,7 @@ export const useEditorStore = create<EditorState>()(
       try {
         const loaded = await db.projects.get(session.projectId);
         if (!loaded) throw new Error('Saved project no longer exists');
-        const normalized = normalizeProjectChapters(loaded);
+        const normalized = await rehydrateProjectAssets(normalizeProjectChapters(loaded));
         const chapterId = normalized.chapters.some((c) => c.id === session.chapterId)
           ? (session.chapterId as string)
           : normalized.activeChapterId;
@@ -315,7 +316,7 @@ export const useEditorStore = create<EditorState>()(
           });
           return;
         }
-        const normalized = normalizeProjectChapters(loaded);
+        const normalized = await rehydrateProjectAssets(normalizeProjectChapters(loaded));
         await db.projects.put(normalized);
         setTimeout(() => {
           set((state) => {
@@ -772,7 +773,7 @@ export const useEditorStore = create<EditorState>()(
         }
 
         if (loadedProject) {
-          const normalized = normalizeProjectChapters(loadedProject);
+          const normalized = await rehydrateProjectAssets(normalizeProjectChapters(loadedProject));
           await db.projects.put(normalized);
           set((state) => {
             state.project = normalized;
