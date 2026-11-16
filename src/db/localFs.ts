@@ -12,7 +12,24 @@ export interface LocalFsStatus {
   files: { name: string; type: 'project' | 'asset'; size: number }[];
 }
 
+/**
+ * The `/api/fs/*` endpoints only exist when running through the Vite dev / preview server. In a static
+ * deployment or the browser extension they don't, so probe once and stay silent afterwards instead of
+ * firing a failing request (and a console error) on every save.
+ */
+let devFsProbe: Promise<boolean> | null = null;
+function devFsAvailable(): Promise<boolean> {
+  if (typeof location === 'undefined' || !/^https?:$/.test(location.protocol)) return Promise.resolve(false);
+  if (!devFsProbe) {
+    devFsProbe = fetch('/api/fs/status')
+      .then(async (r) => r.ok && (await r.json())?.available === true)
+      .catch(() => false);
+  }
+  return devFsProbe;
+}
+
 export async function getLocalFsStatus(): Promise<LocalFsStatus | null> {
+  if (!(await devFsAvailable())) return null;
   try {
     const res = await fetch('/api/fs/status');
     if (!res.ok) return null;
@@ -27,6 +44,7 @@ export async function getLocalFsStatus(): Promise<LocalFsStatus | null> {
 }
 
 export async function updateLocalFsDirectory(storageDir: string): Promise<string | null> {
+  if (!(await devFsAvailable())) return null;
   try {
     const res = await fetch('/api/fs/config', {
       method: 'POST',
@@ -43,6 +61,7 @@ export async function updateLocalFsDirectory(storageDir: string): Promise<string
 
 export async function syncProjectToLocalFs(project: BookProject): Promise<boolean> {
   mirrorProjectToFolder(project); // File System Access backup folder (no-op unless connected)
+  if (!(await devFsAvailable())) return false;
   try {
     const res = await fetch('/api/fs/project', {
       method: 'POST',
@@ -57,6 +76,7 @@ export async function syncProjectToLocalFs(project: BookProject): Promise<boolea
 
 export async function deleteProjectFromLocalFs(id: string): Promise<boolean> {
   void removeProjectFromFolder(id);
+  if (!(await devFsAvailable())) return false;
   try {
     const res = await fetch(`/api/fs/project?id=${encodeURIComponent(id)}`, {
       method: 'DELETE',
@@ -78,6 +98,7 @@ export async function syncAllWithLocalFs(): Promise<{
 }> {
   let restoredFromDisk = 0;
   let writtenToDisk = 0;
+  if (!(await devFsAvailable())) return { restoredFromDisk, writtenToDisk };
 
   try {
     const res = await fetch('/api/fs/projects');

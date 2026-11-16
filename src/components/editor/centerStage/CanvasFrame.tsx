@@ -121,9 +121,11 @@ export const CanvasFrame: React.FC = () => {
       style={{ backgroundColor: activeChapter?.backgroundColor || '#FFFFFF' }}
     >
       <Frame data={resolvedCraftData}>
-        <Element is={CanvasContainer} id="page-root" canvas>
-          {/* Default starter blocks for Chapter 1 (Wyzard design system only; 'plain' starts blank) */}
-          {!isPlain && <>
+        {/* Craft.js cannot resolve a React Fragment as a block, so the two variants are separate elements */}
+        {isPlain ? (
+          <Element is={CanvasContainer} id="page-root" canvas />
+        ) : (
+          <Element is={CanvasContainer} id="page-root" canvas>
           <HeroSpreadBlock
             kicker="CHAPTER OPENER"
             title="The Art of Reflowable Design"
@@ -155,8 +157,8 @@ export const CanvasFrame: React.FC = () => {
             keepTogetherOnPageTurn={true}
           />
           <OrnamentDividerBlock type="asterisms" spacingY="md" />
-          </>}
-        </Element>
+          </Element>
+        )}
       </Frame>
     </div>
   );
