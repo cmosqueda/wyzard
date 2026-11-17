@@ -315,7 +315,7 @@ export const TableBlock: UserComponent<TableBlockProps> = ({
                       {r === 0 && (
                         <div
                           className={`absolute -top-6 left-1/2 -translate-x-1/2 z-20 ${
-                            selected ? 'opacity-100' : 'opacity-0 group-hover/cell:opacity-100'
+                            selected ? 'opacity-100' : 'opacity-0 group-hover/cell:opacity-100 [@media(hover:none)]:opacity-100'
                           } transition-opacity`}
                         >
                           <PopoverMenu
@@ -371,7 +371,7 @@ export const TableBlock: UserComponent<TableBlockProps> = ({
                       {c === 0 && (
                         <div
                           className={`absolute top-1/2 -translate-y-1/2 -left-7 z-20 ${
-                            selected ? 'opacity-100' : 'opacity-0 group-hover/cell:opacity-100'
+                            selected ? 'opacity-100' : 'opacity-0 group-hover/cell:opacity-100 [@media(hover:none)]:opacity-100'
                           } transition-opacity`}
                         >
                           <PopoverMenu
@@ -429,7 +429,7 @@ export const TableBlock: UserComponent<TableBlockProps> = ({
           onClick={() => insertRow(rowCount)}
           title="Add row"
           className={`absolute left-7 right-7 bottom-1 h-5 flex items-center justify-center rounded border border-dashed border-neo-ink/40 text-gray-500 hover:bg-neo-yellow/40 hover:text-neo-ink transition-opacity ${
-            selected ? 'opacity-100' : 'opacity-0 hover:opacity-100'
+            selected ? 'opacity-100' : 'opacity-0 hover:opacity-100 [@media(hover:none)]:opacity-100'
           }`}
         >
           <Plus className="w-3 h-3" strokeWidth={3} />
@@ -439,7 +439,7 @@ export const TableBlock: UserComponent<TableBlockProps> = ({
           onClick={() => insertCol(colCount)}
           title="Add column"
           className={`absolute top-6 bottom-7 right-1 w-5 flex items-center justify-center rounded border border-dashed border-neo-ink/40 text-gray-500 hover:bg-neo-yellow/40 hover:text-neo-ink transition-opacity ${
-            selected ? 'opacity-100' : 'opacity-0 hover:opacity-100'
+            selected ? 'opacity-100' : 'opacity-0 hover:opacity-100 [@media(hover:none)]:opacity-100'
           }`}
         >
           <Plus className="w-3 h-3" strokeWidth={3} />

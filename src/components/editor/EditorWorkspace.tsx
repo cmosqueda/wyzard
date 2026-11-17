@@ -13,6 +13,7 @@ import { SettingsModal } from '../settings/SettingsModal';
 import { MetadataModal } from './MetadataModal';
 import { CanvasContextMenu } from './centerStage/CanvasContextMenu';
 import { CanvasShortcuts } from './centerStage/CanvasShortcuts';
+import { TouchBlockBar } from './centerStage/TouchBlockBar';
 
 // Craft.js resolvers
 import { CanvasContainer } from '../blocks/CanvasContainer';
@@ -71,7 +72,7 @@ export const EditorWorkspace: React.FC = () => {
       restore?.();
     };
 
-    const onMouseDown = (e: MouseEvent) => {
+    const onPointerDown = (e: PointerEvent) => {
       finish();
       const target = e.target as HTMLElement | null;
       if (!target?.closest) return;
@@ -91,19 +92,21 @@ export const EditorWorkspace: React.FC = () => {
 
       restore = () => {
         locked.forEach((el) => el.setAttribute('draggable', 'true'));
-        window.removeEventListener('mouseup', finish, true);
+        window.removeEventListener('pointerup', finish, true);
+        window.removeEventListener('pointercancel', finish, true);
         window.removeEventListener('dragend', finish, true);
         window.removeEventListener('blur', finish);
         restore = null;
       };
-      window.addEventListener('mouseup', finish, true);
+      window.addEventListener('pointerup', finish, true);
+      window.addEventListener('pointercancel', finish, true);
       window.addEventListener('dragend', finish, true);
       window.addEventListener('blur', finish);
     };
 
-    document.addEventListener('mousedown', onMouseDown, true);
+    document.addEventListener('pointerdown', onPointerDown, true);
     return () => {
-      document.removeEventListener('mousedown', onMouseDown, true);
+      document.removeEventListener('pointerdown', onPointerDown, true);
       finish();
     };
   }, []);
@@ -130,7 +133,7 @@ export const EditorWorkspace: React.FC = () => {
   }, [undo, redo, saveProjectToDb]);
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-neo-bg">
+    <div className="flex flex-col h-dvh w-screen overflow-hidden bg-neo-bg">
       <Editor
         key={`${project.id}:${project.activeChapterId}`}
         onNodesChange={(query) => {
@@ -207,6 +210,7 @@ export const EditorWorkspace: React.FC = () => {
           initialRatio={readerInitialRatio}
         />
         <CanvasShortcuts />
+        <TouchBlockBar />
         <CanvasContextMenu />
         <MetadataModal isOpen={isMetadataOpen} onClose={() => setMetadataOpen(false)} />
         <SettingsModal

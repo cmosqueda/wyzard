@@ -302,3 +302,67 @@ html.dark ::-webkit-scrollbar-thumb {
 .craftjs-indicator {
   z-index: 9999 !important;
 }
+
+/* ==========================================================================
+   Touch & responsive support (tablets / phones)
+   ========================================================================== */
+html, body, #root {
+  height: 100%;
+  overscroll-behavior: none;            /* no pull-to-refresh / rubber-band while editing */
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Remove the 300ms tap delay + double-tap zoom, and the grey tap flash */
+button, a, [role="button"], summary, label, select, input, .cursor-pointer, [draggable="true"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Device bezel is the touch "grab bar": never let the browser steal the gesture for scrolling */
+[data-canvas-drag-handle="true"] {
+  touch-action: none;
+}
+
+/* The studio manages its own pinch-zoom, so stop the browser zooming the whole UI */
+body {
+  touch-action: pan-x pan-y;
+}
+
+@media (pointer: coarse) {
+  /* Comfortable (>= 40px) tap targets for studio chrome; the book page itself is left untouched */
+  header button,
+  aside button,
+  [data-stage-ui="true"] button,
+  [data-context-menu="true"] button,
+  .fixed.inset-0 button {
+    min-height: 40px;
+    min-width: 40px;
+  }
+  [data-book-page-sheet="true"] button {
+    min-height: 0;
+    min-width: 0;
+  }
+
+  /* 16px inputs prevent the browser auto-zooming on focus */
+  aside input, aside select, aside textarea,
+  .fixed.inset-0 input, .fixed.inset-0 select, .fixed.inset-0 textarea,
+  header input {
+    font-size: 16px;
+  }
+
+  /* Hover-only affordances become always-visible */
+  .group:active { transform: none; }
+
+  /* Keep the block action bar from covering the last block */
+  main[data-stage-bg="true"] { padding-bottom: 5rem; }
+}
+
+/* Respect notches / rounded corners / home indicator */
+header { padding-top: env(safe-area-inset-top); padding-left: max(0.75rem, env(safe-area-inset-left)); padding-right: max(0.75rem, env(safe-area-inset-right)); }
+
+/* Modals never exceed the visible viewport when the on-screen keyboard / URL bar changes it */
+.fixed.inset-0 > [class*="max-h-["] { max-height: 94dvh; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

@@ -84,7 +84,7 @@ const shouldRestoreSession = !!(initialSession && initialSession.workspaceOpen =
 
 const getInitialPanelOpenState = (): boolean => {
   if (typeof window === 'undefined') return true;
-  return window.innerWidth >= 1024;
+  return window.innerWidth >= 1280;
 };
 
 interface EditorState {
@@ -205,7 +205,7 @@ export const useEditorStore = create<EditorState>()(
         const next = !state.isLeftRailOpen;
         state.isLeftRailOpen = next;
         // On small mobile screens (<768px), auto-close the opposite rail so they don't overlap
-        if (next && typeof window !== 'undefined' && window.innerWidth < 768) {
+        if (next && typeof window !== 'undefined' && window.innerWidth < 1280) {
           state.isRightRailOpen = false;
         }
       });
@@ -214,7 +214,7 @@ export const useEditorStore = create<EditorState>()(
     setLeftRailOpen: (open) => {
       set((state) => {
         state.isLeftRailOpen = open;
-        if (open && typeof window !== 'undefined' && window.innerWidth < 768) {
+        if (open && typeof window !== 'undefined' && window.innerWidth < 1280) {
           state.isRightRailOpen = false;
         }
       });
@@ -224,7 +224,7 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         const next = !state.isRightRailOpen;
         state.isRightRailOpen = next;
-        if (next && typeof window !== 'undefined' && window.innerWidth < 768) {
+        if (next && typeof window !== 'undefined' && window.innerWidth < 1280) {
           state.isLeftRailOpen = false;
         }
       });
@@ -233,7 +233,7 @@ export const useEditorStore = create<EditorState>()(
     setRightRailOpen: (open) => {
       set((state) => {
         state.isRightRailOpen = open;
-        if (open && typeof window !== 'undefined' && window.innerWidth < 768) {
+        if (open && typeof window !== 'undefined' && window.innerWidth < 1280) {
           state.isLeftRailOpen = false;
         }
       });

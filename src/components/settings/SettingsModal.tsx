@@ -616,16 +616,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               </button>
 
               <a
-                href="/wyzard-browser-extension-v1.1.2.zip"
-                download="wyzard-browser-extension-v1.1.2.zip"
+                href="/wyzard-browser-extension-v1.1.3.zip"
+                download="wyzard-browser-extension-v1.1.3.zip"
                 onClick={() =>
-                  showToast('Downloading Wyzard v1.1.2 Browser Extension (.ZIP) bundle...')
+                  showToast('Downloading Wyzard v1.1.3 Browser Extension (.ZIP) bundle...')
                 }
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-neo-yellow hover:bg-neo-vermilion hover:text-white text-neo-ink border border-neo-ink rounded text-xs font-mono font-bold shadow-neo-sm transition-colors"
                 title="Download unpackable Chrome/Edge/Brave/Firefox Manifest V3 Extension .zip"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>Browser Extension v1.1.2 (.ZIP)</span>
+                <span>Browser Extension v1.1.3 (.ZIP)</span>
               </a>
 
               {orphanedAssets.length > 0 && (

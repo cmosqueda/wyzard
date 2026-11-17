@@ -295,6 +295,39 @@ export const CenterStage: React.FC = () => {
     return () => el.removeEventListener('wheel', handleWheel);
   }, [setZoomLevel]);
 
+  // Two-finger pinch zooms the page (the browser's own page-zoom is disabled on the stage via touch-action)
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    let startDist = 0;
+    let startZoom = 100;
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        startDist = dist(e.touches);
+        startZoom = useEditorStore.getState().zoomLevel;
+      }
+    };
+    const onMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !startDist) return;
+      e.preventDefault();
+      setZoomLevel(Math.max(25, Math.min(250, Math.round(startZoom * (dist(e.touches) / startDist)))));
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) startDist = 0;
+    };
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd, { passive: true });
+    el.addEventListener('touchcancel', onEnd, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+    };
+  }, [setZoomLevel]);
+
   const canPanEverywhere = isPanMode || isSpacePressed;
 
   const handlePointerDownCapture = (e: React.PointerEvent<HTMLElement>) => {
@@ -442,6 +475,8 @@ export const CenterStage: React.FC = () => {
             }
       }
       className={`flex-1 bg-neo-bg min-h-0 overflow-y-auto overflow-x-auto relative flex flex-col items-center py-3 sm:py-5 px-2 sm:px-4 select-none min-w-0 ${
+        canPanEverywhere ? 'touch-none' : ''
+      } ${
         isDraggingCanvas || isRightPanning
           ? 'cursor-grabbing'
           : canPanEverywhere
@@ -456,14 +491,14 @@ export const CenterStage: React.FC = () => {
       >
         <div data-stage-ui="true" data-stage-panel="true" className="absolute left-0 top-3 flex items-start">
           {isStageToolsOpen && (
-            <div className="w-52 max-h-[calc(100vh-9rem)] overflow-y-auto bg-white border-neo border-l-0 border-neo-ink rounded-r-xl shadow-neo-sm p-2.5 flex flex-col gap-3 text-[11px] font-mono animate-in fade-in slide-in-from-left-2 duration-150">
+            <div className="w-52 max-h-[calc(100dvh-9rem)] overflow-y-auto bg-white border-neo border-l-0 border-neo-ink rounded-r-xl shadow-neo-sm p-2.5 flex flex-col gap-3 text-[11px] font-mono animate-in fade-in slide-in-from-left-2 duration-150">
               {/* Mode */}
               <div className="flex flex-col gap-1">
                 <span className="text-[9px] uppercase tracking-wider text-gray-500 font-bold">Mode</span>
                 <div className="grid grid-cols-2 gap-1">
                   <button
                     onClick={() => setIsPanMode(false)}
-                    className={`flex items-center justify-center gap-1 py-1.5 rounded-lg font-bold border border-neo-ink transition-all ${
+                    className={`flex items-center justify-center gap-1 py-2 rounded-lg font-bold border border-neo-ink transition-all ${
                       !canPanEverywhere ? 'bg-neo-yellow text-neo-ink' : 'bg-white text-gray-600 hover:bg-neo-bg'
                     }`}
                     title="Select & edit blocks"
@@ -473,7 +508,7 @@ export const CenterStage: React.FC = () => {
                   </button>
                   <button
                     onClick={() => setIsPanMode(true)}
-                    className={`flex items-center justify-center gap-1 py-1.5 rounded-lg font-bold border border-neo-ink transition-all ${
+                    className={`flex items-center justify-center gap-1 py-2 rounded-lg font-bold border border-neo-ink transition-all ${
                       canPanEverywhere ? 'bg-neo-vermilion text-white' : 'bg-white text-gray-600 hover:bg-neo-bg'
                     }`}
                     title="Pan / drag the canvas (or hold Space, or drag with the right mouse button)"
@@ -492,7 +527,7 @@ export const CenterStage: React.FC = () => {
                     <button
                       disabled={activeChapterIndex <= 0}
                       onClick={() => activeChapterIndex > 0 && setActiveChapter(project.chapters[activeChapterIndex - 1].id)}
-                      className="p-0.5 rounded hover:bg-neo-bg disabled:opacity-30"
+                      className="p-1.5 rounded hover:bg-neo-bg disabled:opacity-30"
                       title="Previous chapter"
                     >
                       <ChevronLeft className="w-3.5 h-3.5 text-neo-ink" strokeWidth={2.5} />
@@ -507,7 +542,7 @@ export const CenterStage: React.FC = () => {
                         activeChapterIndex < project.chapters.length - 1 &&
                         setActiveChapter(project.chapters[activeChapterIndex + 1].id)
                       }
-                      className="p-0.5 rounded hover:bg-neo-bg disabled:opacity-30"
+                      className="p-1.5 rounded hover:bg-neo-bg disabled:opacity-30"
                       title="Next chapter"
                     >
                       <ChevronRight className="w-3.5 h-3.5 text-neo-ink" strokeWidth={2.5} />
@@ -537,11 +572,11 @@ export const CenterStage: React.FC = () => {
               <div className="flex flex-col gap-1">
                 <span className="text-[9px] uppercase tracking-wider text-gray-500 font-bold">Zoom</span>
                 <div className="flex items-center justify-between border border-neo-ink rounded-lg px-1.5 py-1">
-                  <button onClick={() => setZoomLevel(zoomLevel - 10)} className="p-0.5 hover:text-neo-vermilion" title="Zoom out (Ctrl + -)">
+                  <button onClick={() => setZoomLevel(zoomLevel - 10)} className="p-1.5 hover:text-neo-vermilion" title="Zoom out (Ctrl + -)">
                     <ZoomOut className="w-3.5 h-3.5" strokeWidth={2.5} />
                   </button>
                   <span className="font-bold">{Math.round(effectiveScale * 100)}%</span>
-                  <button onClick={() => setZoomLevel(zoomLevel + 10)} className="p-0.5 hover:text-neo-vermilion" title="Zoom in (Ctrl + +)">
+                  <button onClick={() => setZoomLevel(zoomLevel + 10)} className="p-1.5 hover:text-neo-vermilion" title="Zoom in (Ctrl + +)">
                     <ZoomIn className="w-3.5 h-3.5" strokeWidth={2.5} />
                   </button>
                 </div>
@@ -564,7 +599,7 @@ export const CenterStage: React.FC = () => {
 
           <button
             onClick={toggleStageTools}
-            className="mt-2 w-6 h-14 flex items-center justify-center bg-white border-neo border-l-0 border-neo-ink rounded-r-lg shadow-neo-sm text-neo-ink hover:bg-neo-yellow transition-colors"
+            className="mt-2 w-8 h-14 flex items-center justify-center bg-white border-neo border-l-0 border-neo-ink rounded-r-lg shadow-neo-sm text-neo-ink hover:bg-neo-yellow transition-colors"
             title={isStageToolsOpen ? 'Collapse canvas tools' : 'Open canvas tools (mode, chapter, zoom)'}
             aria-expanded={isStageToolsOpen}
           >
@@ -662,7 +697,7 @@ export const CenterStage: React.FC = () => {
         ref={setDrawerDock}
         data-stage-ui="true"
         data-stage-panel="true"
-        className="shrink-0 z-20 bg-neo-surface border-t-neo border-neo-ink px-2 sm:px-3 py-2 max-h-[42vh] overflow-y-auto empty:hidden"
+        className="shrink-0 z-20 bg-neo-surface border-t-neo border-neo-ink px-2 sm:px-3 py-2 max-h-[42dvh] overflow-y-auto empty:hidden"
       />
       <div
         ref={setBottomDock}

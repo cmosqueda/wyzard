@@ -226,7 +226,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Right Zone: Undo/Redo, Zoom, Reader, Theme & Settings */}
         <div className="flex items-center gap-2">
           {/* Undo / Redo */}
-          <div className="hidden sm:flex items-center gap-1">
+          <div className="flex items-center gap-1">
             <button
               onClick={undo}
               disabled={historyPointer <= 0}

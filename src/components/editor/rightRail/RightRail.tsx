@@ -15,7 +15,7 @@ export const RightRail: React.FC = () => {
       {isRightRailOpen && (
         <div
           onClick={() => setRightRailOpen(false)}
-          className="fixed inset-0 bg-black/40 backdrop-blur-[1px] z-30 lg:hidden animate-in fade-in duration-150"
+          className="fixed inset-0 bg-black/40 backdrop-blur-[1px] z-30 xl:hidden animate-in fade-in duration-150"
           aria-hidden="true"
         />
       )}
@@ -24,11 +24,11 @@ export const RightRail: React.FC = () => {
         aria-label="Right Inspector Panel"
         className={`bg-neo-surface border-neo-ink flex flex-col h-full select-none transition-all duration-200 ease-in-out shrink-0 ${
           isRightRailOpen
-            ? 'fixed lg:static inset-y-0 right-0 z-40 w-[86vw] max-w-[320px] lg:w-80 border-l-neo shadow-neo-lg lg:shadow-neo translate-x-0'
-            : 'fixed lg:static inset-y-0 right-0 z-40 w-0 max-w-0 border-l-0 overflow-hidden translate-x-full lg:translate-x-0 opacity-0 lg:opacity-100 pointer-events-none'
+            ? 'fixed xl:static inset-y-0 right-0 z-40 w-[86vw] max-w-[340px] xl:w-80 border-l-neo shadow-neo-lg xl:shadow-neo translate-x-0'
+            : 'fixed xl:static inset-y-0 right-0 z-40 w-0 max-w-0 border-l-0 overflow-hidden translate-x-full xl:translate-x-0 opacity-0 xl:opacity-100 pointer-events-none'
         }`}
       >
-        <div className="w-[86vw] max-w-[320px] lg:w-80 h-full min-h-0 flex flex-col">
+        <div className="w-[86vw] max-w-[340px] xl:w-80 h-full min-h-0 flex flex-col">
           {/* Title + Mobile Close Button */}
           <div className="flex items-center justify-between border-b-neo border-neo-ink bg-neo-bg/70 px-3 py-2.5">
             <span className="flex items-center gap-2 font-heading font-bold text-xs uppercase tracking-wider text-neo-ink">
@@ -37,7 +37,7 @@ export const RightRail: React.FC = () => {
             </span>
             <button
               onClick={() => setRightRailOpen(false)}
-              className="p-1.5 rounded border border-neo-ink bg-white hover:bg-neo-vermilion hover:text-white transition-colors lg:hidden shrink-0"
+              className="p-2.5 rounded border border-neo-ink bg-white hover:bg-neo-vermilion hover:text-white transition-colors xl:hidden shrink-0"
               title="Close Inspector Panel"
             >
               <X className="w-4 h-4" strokeWidth={2.5} />

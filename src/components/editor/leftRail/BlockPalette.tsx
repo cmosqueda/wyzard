@@ -1,5 +1,7 @@
-import React from 'react';
-import { useEditor, Element } from '@craftjs/core';
+import React, { useRef } from 'react';
+import { useEditor, Element, ROOT_NODE } from '@craftjs/core';
+import { useEditorStore } from '../../../store/editorStore';
+import { notify } from '../../../store/toastStore';
 import { TypographyBlock } from '../../blocks/TypographyBlock';
 import { ImageBlock } from '../../blocks/ImageBlock';
 import { HeroSpreadBlock } from '../../blocks/HeroSpreadBlock';
@@ -30,7 +32,54 @@ import {
 } from 'lucide-react';
 
 export const BlockPalette: React.FC = () => {
-  const { connectors } = useEditor();
+  const { connectors, actions, query } = useEditor();
+  const setLeftRailOpen = useEditorStore((st) => st.setLeftRailOpen);
+  // Tile DOM node -> the element it creates. Drag (mouse) goes through Craft's HTML5 drag-and-drop,
+  // which touch screens don't support, so every tile can also be tapped to insert it.
+  const tiles = useRef(new Map<HTMLElement, React.ReactElement>());
+  const registerTile = (dom: HTMLElement, element: React.ReactElement) => {
+    tiles.current.set(dom, element);
+    return connectors.create(dom, element);
+  };
+
+  const handleTileClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    let el = e.target as HTMLElement | null;
+    let element: React.ReactElement | undefined;
+    while (el && el !== e.currentTarget) {
+      element = tiles.current.get(el);
+      if (element) break;
+      el = el.parentElement;
+    }
+    if (!element) return;
+    try {
+      const nodes = query.getNodes();
+      const [sel] = Array.from(query.getEvent('selected').all()) as string[];
+      let parentId = ROOT_NODE;
+      let index = (nodes[ROOT_NODE]?.data.nodes || []).length;
+      if (sel && sel !== ROOT_NODE && nodes[sel]?.data.parent) {
+        parentId = nodes[sel].data.parent as string;
+        index = (nodes[parentId].data.nodes || []).indexOf(sel) + 1;
+      }
+      const tree = query.parseReactElement(element).toNodeTree();
+      try {
+        actions.addNodeTree(tree, parentId, index);
+      } catch {
+        actions.addNodeTree(tree, ROOT_NODE);
+      }
+      actions.selectNode(tree.rootNodeId);
+      // On phones / tablets the panel is an overlay: close it so the new block is visible
+      if (window.innerWidth < 1280) setLeftRailOpen(false);
+      requestAnimationFrame(() =>
+        (query.node(tree.rootNodeId).get().dom as HTMLElement | null)?.scrollIntoView({
+          block: 'center',
+          behavior: 'smooth',
+        })
+      );
+    } catch (err) {
+      console.warn('Could not add block:', err);
+      notify({ type: 'error', title: 'Could not add this block' });
+    }
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -39,11 +88,11 @@ export const BlockPalette: React.FC = () => {
           Editorial Blocks
         </h3>
         <p className="text-[10px] font-mono text-gray-500">
-          Drag blocks onto the mobile canvas
+          Tap a block to add it below the selection, or drag it onto the page
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+      <div onClick={handleTileClick} className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
         {/* Section: Typography */}
         <div>
           <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-gray-500 mb-2 block">
@@ -54,7 +103,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(
+                  registerTile(
                     ref,
                     <TypographyBlock
                       text="Editorial Headline"
@@ -74,7 +123,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(
+                  registerTile(
                     ref,
                     <TypographyBlock
                       text="Crafting durable visual prose across responsive viewports requires attention to rhythm and relative scales."
@@ -94,7 +143,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(
+                  registerTile(
                     ref,
                     <TypographyBlock
                       text="“Reflow is not a restriction—it is the living pulse of reading on the web.”"
@@ -125,7 +174,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(
+                  registerTile(
                     ref,
                     <ImageBlock
                       aspectRatio="4/5"
@@ -150,7 +199,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(
+                  registerTile(
                     ref,
                     <HeroSpreadBlock
                       kicker="COVER SPREAD"
@@ -177,7 +226,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(
+                  registerTile(
                     ref,
                     <Element is={SplitContainer} desktopRatio="60/40" gap="md" canvas />
                   );
@@ -198,7 +247,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(ref, <FreeformCanvasBlock />);
+                  registerTile(ref, <FreeformCanvasBlock />);
                 }
               }}
               className="group flex items-center gap-3 p-3 bg-neo-yellow/20 border-neo border-neo-ink rounded-lg shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] active:translate-x-[1px] active:translate-y-[1px] cursor-grab active:cursor-grabbing transition-all"
@@ -216,7 +265,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(ref, <TableBlock />);
+                  registerTile(ref, <TableBlock />);
                 }
               }}
               className="group flex items-center gap-3 p-3 bg-white border-neo border-neo-ink rounded-lg shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] active:translate-x-[1px] active:translate-y-[1px] cursor-grab active:cursor-grabbing transition-all"
@@ -234,7 +283,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(
+                  registerTile(
                     ref,
                     <CalloutCardBlock
                       accent="yellow"
@@ -261,7 +310,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(
+                  registerTile(
                     ref,
                     <OrnamentDividerBlock
                       type="asterisms"
@@ -294,7 +343,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(
+                  registerTile(
                     ref,
                     <AccordionBlock
                       badge="EXPLAINER"
@@ -320,7 +369,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(
+                  registerTile(
                     ref,
                     <HotspotPinboardBlock />
                   );
@@ -341,7 +390,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(
+                  registerTile(
                     ref,
                     <VisualGalleryBlock />
                   );
@@ -362,7 +411,7 @@ export const BlockPalette: React.FC = () => {
             <div
               ref={(ref) => {
                 if (ref) {
-                  connectors.create(
+                  registerTile(
                     ref,
                     <AudioNarrationBlock />
                   );
