@@ -2,10 +2,12 @@ import React from 'react';
 import { useEditorStore } from '../../../store/editorStore';
 import { BlockPalette } from './BlockPalette';
 import { ChapterSpine } from './ChapterSpine';
+import { PageRail } from './PageRail';
 import { AssetLibrary } from './AssetLibrary';
 import { Layers, Library, Sparkles, X } from 'lucide-react';
 
-export const LeftRail: React.FC = () => {
+export const LeftRail: React.FC<{ onOpenPageSetup?: () => void }> = ({ onOpenPageSetup }) => {
+  const isFixed = useEditorStore((s) => s.project.layoutMode === 'fixed');
   const {
     activeSidebarTab,
     setActiveSidebarTab,
@@ -69,7 +71,7 @@ export const LeftRail: React.FC = () => {
                 }`}
               >
                 <Layers className="w-3.5 h-3.5" strokeWidth={2.5} />
-                <span>Spine</span>
+                <span>{isFixed ? 'Pages' : 'Spine'}</span>
               </button>
             </div>
 
@@ -89,7 +91,7 @@ export const LeftRail: React.FC = () => {
             ) : activeSidebarTab === 'assets' ? (
               <AssetLibrary />
             ) : (
-              <ChapterSpine />
+              isFixed ? <PageRail onOpenPageSetup={onOpenPageSetup || (() => {})} /> : <ChapterSpine />
             )}
           </div>
         </div>

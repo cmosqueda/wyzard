@@ -37,6 +37,15 @@ New projects start on a **Plain canvas**: a white page with no styling, like Can
   <img src="docs/screenshots/plain-table-latex.png" alt="A plain canvas with a LaTeX equation and an editable table" width="860" />
 </p>
 
+### Fixed-layout books (traditional, print-style pages)
+Choose **Fixed-layout book** when creating a project to design like a traditional publication instead of a reflowing page:
+- **Real page sizes:** Mobile 390×844, A4, A5, US Letter, Trade 6×9 in, Digest 5×8 in, or any custom size. Enter sizes in px, mm or inches, and rotate to landscape.
+- **Manual pages:** every page is its own canvas, listed in the **Pages** rail with duplicate, reorder and rename. Pages can be grouped into **sections** (Unit, Chapter, …).
+- **Margins and guides:** per-side margins, margin guides on the page, and a warning when content overflows the page.
+- **Running headers and footers:** a three-slot designer with tokens such as `{sectionTitle}`, `{sectionNumber}`, `{shortTitle}` and `{pageNumber}`, section colours, presets (textbook band, classic running head, page number only), and per-page hide / **full-bleed** pages for covers and openers.
+- **Page numbering:** choose the first number and the style (1, i, I, none).
+- **Exports from your pages:** HTML, PDF and CBZ keep each page exactly as laid out. EPUB currently exports pages as reflowable chapters; fixed-layout EPUB, an auto table of contents with clickable entries, and book-feature pages (cover, copyright, preface, …) are planned next.
+
 ### Notion-style tables and LaTeX math
 - **Table block:** click to type, `Tab` / `Enter` to move between cells, paste straight from a spreadsheet, drag column borders, insert / move / delete rows and columns, header row and column, striped rows and per-column alignment.
 - **LaTeX** (KaTeX): the **Σ** button in the text toolbar, or just type `$x^2$` / `$$\int f$$`. Click an equation to edit it with a live preview. Math also works inside callouts, accordions and table cells, and exports as **MathML** in EPUB.

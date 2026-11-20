@@ -41,6 +41,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 }) => {
   const { project } = useEditorStore();
   const [selectedRatio, setSelectedRatio] = useState<ScreenRatioKey>('tablet');
+  const isFixed = project.layoutMode === 'fixed';
+  const ratioShortLabel =
+    isFixed && project.pageSetup
+      ? `Page ${Math.round(project.pageSetup.width)}×${Math.round(project.pageSetup.height)}`
+      : SCREEN_RATIO_PRESETS[selectedRatio].shortLabel;
+  const ratioLongLabel =
+    isFixed && project.pageSetup
+      ? `your ${Math.round(project.pageSetup.width)}×${Math.round(project.pageSetup.height)} px page size`
+      : SCREEN_RATIO_PRESETS[selectedRatio].label;
   const [busyFormat, setBusyFormat] = useState<'epub' | 'zip' | 'pdf' | 'cbz' | null>(null);
   const [cbzProgress, setCbzProgress] = useState<string>('');
 
@@ -114,7 +123,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       notify({
         type: 'success',
         title: 'Paginated PDF Page-Grab Ready',
-        message: `Generated ${paginatedPages.length} asset-safe pages for ${SCREEN_RATIO_PRESETS[selectedRatio].shortLabel}.`,
+        message: `Generated ${paginatedPages.length} asset-safe pages for ${ratioShortLabel}.`,
       });
     } finally {
       setBusyFormat(null);
@@ -174,7 +183,27 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
         {/* Scrollable Content Body */}
         <div className="p-5 flex-1 overflow-y-auto flex flex-col gap-5">
-          {/* Viewport Ratio Selector for Page-Grab PDF & CBZ Comic Exports */}
+          {isFixed && project.pageSetup ? (
+            <div className="p-4 bg-white border-neo border-neo-ink rounded-xl shadow-neo-sm flex flex-col gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="font-heading font-bold text-sm text-neo-ink block">
+                    Fixed-layout book · {Math.round(project.pageSetup.width)} × {Math.round(project.pageSetup.height)} px pages
+                  </span>
+                  <span className="font-mono text-[11px] text-gray-500">
+                    Every page you designed exports exactly as laid out, with its header, footer and margins. Change the size in Page setup.
+                  </span>
+                </div>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-neo-teal/20 border border-neo-ink font-mono text-[11px] font-bold text-neo-ink">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>{project.chapters.length} Pages</span>
+                </span>
+              </div>
+              <p className="font-mono text-[10px] text-gray-500 leading-snug">
+                HTML, PDF and CBZ keep the fixed pages. EPUB currently exports each page as a reflowable chapter; fixed-layout EPUB is planned.
+              </p>
+            </div>
+          ) : (
           <div className="p-4 bg-white border-neo border-neo-ink rounded-xl shadow-neo-sm flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -213,6 +242,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               ))}
             </div>
           </div>
+          )}
 
           {/* 4 Export Format Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -270,12 +300,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     <span>2. Paginated Page-Grab .PDF</span>
                   </span>
                   <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-neo-teal/30 border border-neo-ink">
-                    {SCREEN_RATIO_PRESETS[selectedRatio].shortLabel}
+                    {ratioShortLabel}
                   </span>
                 </div>
                 <p className="text-xs text-gray-600 leading-relaxed">
                   Captures discrete per-page grabs calibrated to{' '}
-                  <strong>{SCREEN_RATIO_PRESETS[selectedRatio].label}</strong>. Smart asset
+                  <strong>{ratioLongLabel}</strong>. Smart asset
                   placement guarantees illustrations and artboards are pushed to the next page if
                   they would be cut off.
                 </p>

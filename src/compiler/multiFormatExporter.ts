@@ -9,7 +9,21 @@ import {
 } from './webCompiler';
 import { db } from '../db';
 import { googleFontStack, loadGoogleFont } from '../utils/googleFonts';
+import { unescapeHtml } from '../utils/math';
+
+/** Rich text (HTML from the editor) -> plain text for canvas drawing: no tags, decoded entities, math as TeX. */
+function htmlToPlainText(html: string): string {
+  return unescapeHtml(
+    html
+      .replace(/<span[^>]*class="wz-math"[^>]*data-tex="([^"]*)"[^>]*><\/span>/g, (_m, tex: string) => unescapeHtml(tex))
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|h[1-6]|li)>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+  ).trim();
+}
 import { getArtboardHeightRatio, getArtboardWidthPct } from '../utils/artboard';
+import { getPageContext, getPageRegions } from '../utils/pageLayout';
+import { renderFixedPageHtml, FIXED_PAGE_CSS, drawZoneOnCanvas } from './fixedPage';
 
 export type ScreenRatioKey = 'mobile' | 'tablet' | 'laptop' | 'comic' | 'square';
 
@@ -87,6 +101,8 @@ export interface PaginatedPage {
   usedHeight: number;
   usableHeight: number;
   preset: ScreenRatioPreset;
+  /** Fixed-layout book page: laid out by the author, never split or re-flowed */
+  fixed?: boolean;
 }
 
 function parseAspectRatioValue(ratio?: string): number {
@@ -357,11 +373,50 @@ function expandOversizedTypography(
  * Visual assets that do not fit in the remaining vertical space on the current
  * page are pushed cleanly to the top of the next page so they are NEVER cut off.
  */
+function paginateFixedBook(project: BookProject, onlyChapterId?: string): PaginatedPage[] {
+  const setup = project.pageSetup!;
+  const preset: ScreenRatioPreset = {
+    key: 'mobile',
+    label: `Fixed page (${Math.round(setup.width)}×${Math.round(setup.height)})`,
+    shortLabel: `${Math.round(setup.width)}×${Math.round(setup.height)}`,
+    width: Math.round(setup.width),
+    height: Math.round(setup.height),
+    paddingX: setup.margins.left,
+    paddingY: setup.margins.top,
+  };
+  const pages: PaginatedPage[] = [];
+  project.chapters.forEach((chapter, idx) => {
+    if (onlyChapterId && chapter.id !== onlyChapterId) return;
+    const regions = getPageRegions(setup, chapter);
+    const nodes = chapter.craftStateJson ? parseCraftState(chapter.craftStateJson) : [];
+    const items: PaginatedBlockItem[] = nodes.map((node) => ({
+      node,
+      estimatedHeight: Math.min(regions.body.h, estimateNodeHeight(node, regions.body.w, regions.body.h)),
+      isVisualAsset: isVisualBlock(node.type),
+      movedToAvoidCut: false,
+    }));
+    pages.push({
+      pageNumber: idx + 1,
+      chapterId: chapter.id,
+      chapterTitle: chapter.title,
+      chapterIndex: idx,
+      items,
+      usedHeight: items.reduce((a, b) => a + b.estimatedHeight, 0),
+      usableHeight: regions.body.h,
+      preset,
+      fixed: true,
+    });
+  });
+  return pages;
+}
+
 export function paginateProjectForViewport(
   project: BookProject,
   ratioKey: ScreenRatioKey = 'tablet',
   onlyChapterId?: string
 ): PaginatedPage[] {
+  if (project.layoutMode === 'fixed' && project.pageSetup) return paginateFixedBook(project, onlyChapterId);
+
   const preset = SCREEN_RATIO_PRESETS[ratioKey] || SCREEN_RATIO_PRESETS.tablet;
   const headerFooterReserve = 56; // Folio top bar + page number footer
   const usableHeight = Math.max(240, preset.height - preset.paddingY * 2 - headerFooterReserve);
@@ -472,6 +527,14 @@ export function renderPaginatedPageHtml(
   project: BookProject,
   totalPages: number
 ): string {
+  if (page.fixed) {
+    return renderFixedPageHtml(
+      project,
+      page.chapterIndex,
+      page.items.map((i) => i.node),
+      renderWebNode
+    );
+  }
   const { preset } = page;
   const maxAssetHeight = Math.max(180, page.usableHeight - 36);
 
@@ -526,6 +589,7 @@ export function compilePaginatedPdfDocument(
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
   <style>
     ${getWebPublicationStyles(project.designSystem)}
+    ${FIXED_PAGE_CSS}
 
     @page {
       size: ${preset.width}px ${preset.height}px;
@@ -1033,42 +1097,53 @@ export async function renderPageGrabToCanvasDataUrl(
         box: '#FAF9F6',
       };
 
+  // Fixed-layout book pages use the authored regions (margins, header, footer) instead of the comic folio
+  const fxPage = page.fixed && project.pageSetup ? project.chapters[page.chapterIndex] : null;
+  const fx = fxPage ? getPageRegions(project.pageSetup!, fxPage) : null;
+
   // 1. Paper Background & Neo-Brutalist Comic Frame
-  ctx.fillStyle = '#FFFFFF';
+  ctx.fillStyle = fxPage?.backgroundColor || '#FFFFFF';
   ctx.fillRect(0, 0, preset.width, preset.height);
 
-  if (!plain) {
+  if (!plain && !fx) {
     ctx.strokeStyle = T.line;
     ctx.lineWidth = 4;
     ctx.strokeRect(6, 6, preset.width - 12, preset.height - 12);
   }
 
-  const padX = preset.paddingX;
+  const padX = fx ? fx.body.x : preset.paddingX;
   const padY = preset.paddingY;
-  const contentW = preset.width - padX * 2;
+  const contentW = fx ? fx.body.w : preset.width - padX * 2;
 
-  // 2. Top Folio Bar
-  ctx.fillStyle = '#555555';
-  ctx.font = `bold 10px ${T.mono}`;
+  if (fx) {
+    const tok = getPageContext(project, page.chapterIndex);
+    if (fx.header) drawZoneOnCanvas(ctx, fx.header.zone, tok, fx.header);
+    if (fx.footer) drawZoneOnCanvas(ctx, fx.footer.zone, tok, fx.footer);
+  } else {
+  // 2. Top Folio Bar (comic exports) or the authored header / footer (fixed-layout books)
+    ctx.fillStyle = '#555555';
+    ctx.font = `bold 10px ${T.mono}`;
+    ctx.textBaseline = 'top';
+    ctx.fillText(
+      (project.metadata.title || project.title).toUpperCase().slice(0, 38),
+      padX,
+      padY - 12
+    );
+    const chapLabel = page.chapterTitle.toUpperCase().slice(0, 32);
+    const chapW = ctx.measureText(chapLabel).width;
+    ctx.fillText(chapLabel, preset.width - padX - chapW, padY - 12);
+  
+    ctx.strokeStyle = T.line;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(padX, padY + 4);
+    ctx.lineTo(preset.width - padX, padY + 4);
+    ctx.stroke();
+  }
+
+  let curY = fx ? fx.body.y : padY + 18;
   ctx.textBaseline = 'top';
-  ctx.fillText(
-    (project.metadata.title || project.title).toUpperCase().slice(0, 38),
-    padX,
-    padY - 12
-  );
-  const chapLabel = page.chapterTitle.toUpperCase().slice(0, 32);
-  const chapW = ctx.measureText(chapLabel).width;
-  ctx.fillText(chapLabel, preset.width - padX - chapW, padY - 12);
-
-  ctx.strokeStyle = T.line;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(padX, padY + 4);
-  ctx.lineTo(preset.width - padX, padY + 4);
-  ctx.stroke();
-
-  let curY = padY + 18;
-  const maxBottomY = preset.height - padY - 22;
+  const maxBottomY = fx ? fx.body.y + fx.body.h : preset.height - padY - 22;
 
   // 3. Render each block item on this page grab
   for (const item of page.items) {
@@ -1081,7 +1156,7 @@ export async function renderPageGrabToCanvasDataUrl(
       case 'TypographyBlock':
       case 'EditorialTypography': {
         const variant = p.variant || 'body';
-        const text = String(p.htmlContent || p.text || '');
+        const text = htmlToPlainText(String(p.htmlContent || p.text || ''));
         let fam: string | null = null;
         if (typeof p.googleFont === 'string' && p.googleFont.trim()) {
           fam = googleFontStack(p.googleFont);
@@ -1487,21 +1562,23 @@ export async function renderPageGrabToCanvasDataUrl(
     }
   }
 
+  if (!fx) {
   // 4. Bottom Folio Bar
-  const footY = preset.height - padY + 2;
-  ctx.strokeStyle = '#CCCCCC';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(padX, footY - 6);
-  ctx.lineTo(preset.width - padX, footY - 6);
-  ctx.stroke();
-
-  ctx.fillStyle = '#666666';
-  ctx.font = `bold 10px ${T.mono}`;
-  ctx.fillText(preset.shortLabel.toUpperCase(), padX, footY);
-  const pgText = `PAGE ${page.pageNumber} / ${totalPages}`;
-  const pgW = ctx.measureText(pgText).width;
-  ctx.fillText(pgText, preset.width - padX - pgW, footY);
+    const footY = preset.height - padY + 2;
+    ctx.strokeStyle = '#CCCCCC';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padX, footY - 6);
+    ctx.lineTo(preset.width - padX, footY - 6);
+    ctx.stroke();
+  
+    ctx.fillStyle = '#666666';
+    ctx.font = `bold 10px ${T.mono}`;
+    ctx.fillText(preset.shortLabel.toUpperCase(), padX, footY);
+    const pgText = `PAGE ${page.pageNumber} / ${totalPages}`;
+    const pgW = ctx.measureText(pgText).width;
+    ctx.fillText(pgText, preset.width - padX - pgW, footY);
+  }
 
   return canvas.toDataURL('image/png');
 }

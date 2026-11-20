@@ -106,6 +106,13 @@ export interface Chapter {
   order: number;
   craftStateJson: string; // Serialized Craft.js state JSON string
   backgroundColor?: string;
+  // ---- Fixed-layout books: in that mode every "chapter" is ONE page ----
+  /** Section this page belongs to (drives header / footer tokens and colour) */
+  sectionId?: string;
+  hideHeader?: boolean;
+  hideFooter?: boolean;
+  /** Full-bleed page: no margins, header or footer (covers, openers) */
+  fullBleed?: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -125,6 +132,8 @@ export interface AssetAttribution {
 
 export interface BookMetadata {
   title: string;
+  /** Short running title for headers / footers, e.g. "ENGLISH 7" */
+  shortTitle?: string;
   author: string;
   identifier?: string;
   language: string; // default 'en'
@@ -141,6 +150,62 @@ export interface BookMetadata {
  */
 export type CanvasDesignSystem = 'plain' | 'wyzard';
 
+export type LayoutMode = 'reflowable' | 'fixed';
+
+export interface ZoneSlot {
+  /** Text with tokens such as {sectionTitle} or {pageNumber}. Extra lines render smaller. */
+  text: string;
+  size?: number;
+  bold?: boolean;
+  color?: string;
+  /** Filled box behind the slot: a colour, or `accent` for the section colour */
+  bg?: string;
+  padX?: number;
+}
+
+export interface HeaderFooterZone {
+  enabled: boolean;
+  height: number;
+  /** Colour, `accent` (section colour) or `transparent` */
+  background: string;
+  color: string;
+  borderColor: string;
+  borderWidth: number;
+  left?: ZoneSlot;
+  center?: ZoneSlot;
+  right?: ZoneSlot;
+}
+
+export type PageNumberStyle = 'arabic' | 'roman' | 'roman-upper' | 'none';
+
+export interface PageNumbering {
+  start: number;
+  style: PageNumberStyle;
+}
+
+export interface PageSetup {
+  sizeKey: string;
+  /** CSS pixels (96 per inch) */
+  width: number;
+  height: number;
+  margins: { top: number; right: number; bottom: number; left: number };
+  showGuides: boolean;
+  numbering: PageNumbering;
+  /** Default section colour when a page has no section */
+  accentColor?: string;
+  header: HeaderFooterZone;
+  footer: HeaderFooterZone;
+}
+
+export interface BookSection {
+  id: string;
+  title: string;
+  subtitle?: string;
+  /** Free text shown by {sectionNumber}, e.g. "1" or "I" */
+  number?: string;
+  color?: string;
+}
+
 export interface BookProject {
   id: string;
   title: string;
@@ -148,6 +213,10 @@ export interface BookProject {
   chapters: Chapter[];
   activeChapterId: string;
   designSystem?: CanvasDesignSystem; // undefined => 'wyzard' (legacy projects)
+  /** undefined => 'reflowable'. In 'fixed' mode each chapter is a single fixed-size page. */
+  layoutMode?: LayoutMode;
+  pageSetup?: PageSetup;
+  sections?: BookSection[];
   createdAt: number;
   updatedAt: number;
 }

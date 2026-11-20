@@ -3,6 +3,8 @@ import { useEditorStore } from '../../../store/editorStore';
 import { VIEWPORT_PRESETS } from '../../../types/ast';
 import { CanvasFrame } from './CanvasFrame';
 import { StageDockContext } from './StageDock';
+import { FixedPageStage } from './FixedPage';
+import { describePageSize } from '../../../utils/pageLayout';
 
 // The Craft.js frame has no props; memoising it keeps pan / zoom from re-rendering every block
 const StaticCanvasFrame = React.memo(CanvasFrame);
@@ -33,6 +35,9 @@ export const CenterStage: React.FC = () => {
 
   const isMobile = viewportMode === 'mobile';
   const isPlain = project.designSystem === 'plain';
+  // Fixed-layout book: the stage shows an exact-size page instead of a device preview
+  const fixedSetup = project.layoutMode === 'fixed' && project.pageSetup ? project.pageSetup : null;
+  const [showPageGuides, setShowPageGuides] = useState(true);
 
   const activeChapterIndex = project.chapters.findIndex(
     (c) => c.id === project.activeChapterId
@@ -393,7 +398,7 @@ export const CenterStage: React.FC = () => {
 
     // The plain canvas has no bezel, so dragging empty stage space around the page pans instead
     const isEmptyStageSpace =
-      isPlain && e.button === 0 && target.getAttribute('data-stage-bg') === 'true';
+      (isPlain || !!fixedSetup) && e.button === 0 && target.getAttribute('data-stage-bg') === 'true';
 
     // Only intercept pointer for panning when Pan Mode / Spacebar is active, middle-click, dragging the device
     // top bezel, or (plain) empty stage background, so normal touch/scroll on the page works effortlessly!
@@ -438,7 +443,7 @@ export const CenterStage: React.FC = () => {
 
   // Compute responsive auto-fit scale when screen is narrower than preset.width
   const availableW = Math.max(260, stageWidth - 24);
-  const autoFitScale = Math.min(1, availableW / preset.width);
+  const autoFitScale = Math.min(1, availableW / (fixedSetup ? fixedSetup.width : preset.width));
   const effectiveScale = Number(((zoomLevel / 100) * autoFitScale).toFixed(3));
 
   scaleRef.current = effectiveScale;
@@ -553,13 +558,21 @@ export const CenterStage: React.FC = () => {
 
               {/* Viewport */}
               <div className="flex flex-col gap-1">
-                <span className="text-[9px] uppercase tracking-wider text-gray-500 font-bold">Viewport</span>
+                <span className="text-[9px] uppercase tracking-wider text-gray-500 font-bold">
+                  {fixedSetup ? 'Page' : 'Viewport'}
+                </span>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="w-2 h-2 rounded-full bg-neo-yellow shrink-0" />
-                  <span className="font-bold text-neo-ink">{preset.name}</span>
-                  <span className="text-gray-500">
-                    {preset.width}×{preset.height}px
-                  </span>
+                  {fixedSetup ? (
+                    <span className="font-bold text-neo-ink">{describePageSize(fixedSetup)}</span>
+                  ) : (
+                    <>
+                      <span className="font-bold text-neo-ink">{preset.name}</span>
+                      <span className="text-gray-500">
+                        {preset.width}×{preset.height}px
+                      </span>
+                    </>
+                  )}
                   {autoFitScale < 0.99 && (
                     <span className="text-[10px] bg-neo-teal/25 text-neo-ink px-1.5 rounded border border-neo-ink font-bold">
                       Fit {Math.round(effectiveScale * 100)}%
@@ -567,6 +580,18 @@ export const CenterStage: React.FC = () => {
                   )}
                 </div>
               </div>
+
+              {fixedSetup && (
+                <label className="flex items-center gap-2 cursor-pointer text-neo-ink">
+                  <input
+                    type="checkbox"
+                    checked={showPageGuides}
+                    onChange={(e) => setShowPageGuides(e.target.checked)}
+                    className="w-3.5 h-3.5 accent-neo-ink"
+                  />
+                  Margin guides
+                </label>
+              )}
 
               {/* Zoom */}
               <div className="flex flex-col gap-1">
@@ -630,6 +655,19 @@ export const CenterStage: React.FC = () => {
               : 'transition-transform duration-150'
           }
         >
+          {fixedSetup ? (
+            <div className={canPanEverywhere ? 'pointer-events-none' : ''}>
+              <FixedPageStage
+                project={project}
+                page={activeChapter}
+                pageIndex={Math.max(0, activeChapterIndex)}
+                setup={fixedSetup}
+                showGuides={showPageGuides}
+              >
+                <StaticCanvasFrame />
+              </FixedPageStage>
+            </div>
+          ) : (
           <div
             data-design-system={isPlain ? 'plain' : 'wyzard'}
             className={`bg-white overflow-hidden flex flex-col relative ${
@@ -690,6 +728,7 @@ export const CenterStage: React.FC = () => {
               <StaticCanvasFrame />
             </div>
           </div>
+          )}
         </div>
       </div>
     </main>

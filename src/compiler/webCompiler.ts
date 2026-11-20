@@ -2,6 +2,7 @@ import type { BookProject, Chapter, CanvasDesignSystem } from '../types/ast';
 import { parseCraftState, type ParsedBlockNode } from './astParser';
 import { googleFontsHref, googleFontStack } from '../utils/googleFonts';
 import { getArtboardHeightRatio, getArtboardWidthPct } from '../utils/artboard';
+import { renderFixedPageHtml, FIXED_PAGE_CSS } from './fixedPage';
 import { KATEX_CSS_HREF, hasMath, htmlHasMath, renderMathInHtml, renderMathInText } from '../utils/math';
 
 const MATH_CSS_LINK = `<link rel="stylesheet" href="${KATEX_CSS_HREF}">`;
@@ -909,7 +910,57 @@ export function getWebPublicationStyles(designSystem?: CanvasDesignSystem): stri
     : getWyzardWebStyles();
 }
 
+/** Fixed-layout book: one exact-size page per document, scaled to fit the window. */
+function compileFixedWebPage(project: BookProject, currentChapterId?: string): string {
+  const activeChapterId = currentChapterId || project.activeChapterId;
+  const pageIndex = Math.max(0, project.chapters.findIndex((c) => c.id === activeChapterId));
+  const page = project.chapters[pageIndex];
+  const nodes = page.craftStateJson ? parseCraftState(page.craftStateJson) : [];
+  const pageHtml = renderFixedPageHtml(project, pageIndex, nodes, renderWebNode);
+  const setup = project.pageSetup!;
+
+  return `<!DOCTYPE html>
+<html lang="${project.metadata.language || 'en'}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${page.title} — ${project.metadata.title}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    ${getWebPublicationStyles(project.designSystem)}
+    ${FIXED_PAGE_CSS}
+    html, body { margin: 0; background: #E5E7EB; }
+    .fx-stage { display: flex; justify-content: center; }
+    .fx-scale { transform-origin: top center; box-shadow: 0 2px 16px rgba(0,0,0,0.25); background: #fff; }
+  </style>
+</head>
+<body>
+  <div class="fx-stage"><div class="fx-scale" id="fx-scale">${pageHtml}</div></div>
+  <script>
+    (function () {
+      var W = ${Math.round(setup.width)}, H = ${Math.round(setup.height)};
+      function fit() {
+        // breathing room only when the window is wider than the page
+        var pad = window.innerWidth > W + 32 ? 16 : 0;
+        document.querySelector('.fx-stage').style.padding = pad + 'px';
+        var s = Math.min(1, (window.innerWidth - pad * 2) / W);
+        var el = document.getElementById('fx-scale');
+        el.style.transform = 'scale(' + s + ')';
+        el.style.height = H + 'px';
+        el.style.marginBottom = (H * s - H) + 'px';
+      }
+      fit(); window.addEventListener('resize', fit);
+    })();
+    ${getWebRuntimeJs()}
+  </script>
+</body>
+</html>`;
+}
+
 export function compileWebPublication(project: BookProject, currentChapterId?: string): string {
+  if (project.layoutMode === 'fixed' && project.pageSetup) return compileFixedWebPage(project, currentChapterId);
   const activeChapterId = currentChapterId || project.activeChapterId;
   const chapter = project.chapters.find((c) => c.id === activeChapterId) || project.chapters[0];
   const parsedNodes = parseCraftState(chapter?.craftStateJson || '');

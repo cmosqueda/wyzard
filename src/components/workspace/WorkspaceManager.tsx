@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, createStarterProject, createBlankProject } from '../../db';
+import { db, createStarterProject, createBlankProject, createFixedBookProject } from '../../db';
+import { PAGE_SIZE_PRESETS, clampPageDimension, type PageSizeKey } from '../../utils/pageLayout';
 import { WyzardLogo } from '../ui/WyzardLogo';
 import { CreditsModal } from './CreditsModal';
 import { BackupReminder } from '../ui/BackupStatus';
@@ -51,6 +52,10 @@ export const WorkspaceManager: React.FC = () => {
   const [isCreditsOpen, setIsCreditsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [newType, setNewType] = useState<'reflowable' | 'fixed'>('reflowable');
+  const [newSizeKey, setNewSizeKey] = useState<PageSizeKey>('mobile');
+  const [newCustomW, setNewCustomW] = useState(600);
+  const [newCustomH, setNewCustomH] = useState(800);
   const [newAuthor, setNewAuthor] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
@@ -103,11 +108,22 @@ export const WorkspaceManager: React.FC = () => {
       return;
     }
     setFormError(null);
-    const blank = createBlankProject(
-      trimmedTitle,
-      newAuthor.trim() || 'Wyzard Author',
-      newDescription.trim() || 'A custom reflowable layout created in Wyzard.'
-    );
+    const preset = PAGE_SIZE_PRESETS.find((p) => p.key === newSizeKey) || PAGE_SIZE_PRESETS[0];
+    const blank =
+      newType === 'fixed'
+        ? createFixedBookProject(
+            trimmedTitle,
+            newAuthor.trim() || 'Wyzard Author',
+            newDescription.trim() || 'A fixed-layout book created in Wyzard.',
+            newSizeKey === 'custom'
+              ? { key: 'custom', width: clampPageDimension(newCustomW), height: clampPageDimension(newCustomH) }
+              : { key: newSizeKey, width: preset.width, height: preset.height }
+          )
+        : createBlankProject(
+            trimmedTitle,
+            newAuthor.trim() || 'Wyzard Author',
+            newDescription.trim() || 'A custom reflowable layout created in Wyzard.'
+          );
     setIsNewModalOpen(false);
     setNewTitle('');
     setNewAuthor('');
@@ -508,10 +524,80 @@ export const WorkspaceManager: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleCreateBlank} className="p-5 flex flex-col gap-4">
+            <form onSubmit={handleCreateBlank} className="p-5 flex flex-col gap-4 max-h-[75vh] overflow-y-auto">
               {formError && (
                 <div className="p-2.5 rounded-lg bg-neo-vermilion/15 border border-neo-vermilion text-neo-vermilion font-mono text-xs font-bold">
                   {formError}
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-mono font-bold uppercase text-neo-ink mb-1">Project type</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      { id: 'reflowable', title: 'Reflowable', desc: 'Flows to any screen. Digital-first, like today.' },
+                      { id: 'fixed', title: 'Fixed-layout book', desc: 'Exact page size with margins, headers, footers and page numbers.' },
+                    ] as const
+                  ).map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setNewType(t.id)}
+                      className={`text-left p-2.5 border-neo border-neo-ink rounded-lg transition-all ${
+                        newType === t.id ? 'bg-neo-yellow shadow-neo-sm' : 'bg-white hover:bg-neo-bg'
+                      }`}
+                    >
+                      <div className="font-heading font-bold text-xs text-neo-ink">{t.title}</div>
+                      <div className="text-[10px] font-mono text-gray-600 mt-0.5 leading-snug">{t.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {newType === 'fixed' && (
+                <div>
+                  <label className="block text-xs font-mono font-bold uppercase text-neo-ink mb-1">Page size</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {PAGE_SIZE_PRESETS.map((p) => (
+                      <button
+                        key={p.key}
+                        type="button"
+                        title={p.note}
+                        onClick={() => setNewSizeKey(p.key)}
+                        className={`px-2 py-1.5 border-neo border-neo-ink rounded text-left font-mono text-[11px] font-bold transition-all ${
+                          newSizeKey === p.key ? 'bg-neo-yellow shadow-neo-sm' : 'bg-white hover:bg-neo-bg'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  {newSizeKey === 'custom' && (
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <label className="flex flex-col text-[10px] font-mono text-gray-500">
+                        Width (px)
+                        <input
+                          type="number"
+                          min={200}
+                          max={3000}
+                          value={newCustomW}
+                          onChange={(e) => setNewCustomW(Number(e.target.value))}
+                          className="mt-0.5 px-2 py-1.5 bg-white border-neo border-neo-ink rounded text-xs"
+                        />
+                      </label>
+                      <label className="flex flex-col text-[10px] font-mono text-gray-500">
+                        Height (px)
+                        <input
+                          type="number"
+                          min={200}
+                          max={3000}
+                          value={newCustomH}
+                          onChange={(e) => setNewCustomH(Number(e.target.value))}
+                          className="mt-0.5 px-2 py-1.5 bg-white border-neo border-neo-ink rounded text-xs"
+                        />
+                      </label>
+                    </div>
+                  )}
+                  <p className="text-[10px] font-mono text-gray-500 mt-1.5">You can change the size, margins and more later in Page setup.</p>
                 </div>
               )}
               <div>

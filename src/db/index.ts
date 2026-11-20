@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
-import type { BookProject } from '../types/ast';
+import type { BookProject, PageSetup } from '../types/ast';
+import { createDefaultPageSetup, type PageSizeKey } from '../utils/pageLayout';
 
 export interface StoredAsset {
   id: string;
@@ -91,6 +92,58 @@ export function createDefaultChapterCraftJson(
       linkedNodes: {},
     },
   });
+}
+
+// Empty fixed-size page: the page body (inside the margins) is filled by the canvas container
+export function createFixedPageCraftJson(): string {
+  return JSON.stringify({
+    ROOT: {
+      type: { resolvedName: 'CanvasContainer' },
+      isCanvas: true,
+      props: { backgroundColor: 'transparent', paddingY: '0px', paddingX: '0px', minHeight: '100%' },
+      displayName: 'Page Body',
+      custom: {},
+      hidden: false,
+      nodes: [],
+      linkedNodes: {},
+    },
+  });
+}
+
+/** A new fixed-layout book: one blank page, plain design system, the chosen page size. */
+export function createFixedBookProject(
+  title = 'Untitled Book',
+  author = 'Wyzard Author',
+  description = 'A fixed-layout book created in Wyzard.',
+  size: { key: PageSizeKey; width?: number; height?: number } = { key: 'mobile' }
+): BookProject {
+  const now = Date.now();
+  const pageId = 'pg-' + now;
+  const pageSetup: PageSetup = createDefaultPageSetup(size.key, size.width, size.height);
+  return {
+    id: 'proj-' + now + '-' + Math.random().toString(36).slice(2, 6),
+    title,
+    metadata: { title, shortTitle: title.slice(0, 18).toUpperCase(), author, language: 'en', description },
+    layoutMode: 'fixed',
+    designSystem: 'plain',
+    pageSetup,
+    sections: [],
+    activeChapterId: pageId,
+    chapters: [
+      {
+        id: pageId,
+        title: 'Page 1',
+        slug: 'page-1',
+        order: 1,
+        backgroundColor: '#FFFFFF',
+        craftStateJson: createFixedPageCraftJson(),
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 // Completely empty page (no starter blocks) — used by the unthemed 'plain' design system
@@ -294,6 +347,8 @@ export function normalizeProjectChapters(project: BookProject): BookProject {
         craftStateJson:
           ch.id === 'ch-2'
             ? createChapter2StarterCraftJson()
+            : project.layoutMode === 'fixed'
+            ? createFixedPageCraftJson()
             : project.designSystem === 'plain'
             ? createEmptyChapterCraftJson()
             : createDefaultChapterCraftJson(ch.title),

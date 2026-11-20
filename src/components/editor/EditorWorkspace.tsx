@@ -11,6 +11,7 @@ import type { ScreenRatioKey } from '../../compiler/multiFormatExporter';
 import { TemplatePickerModal } from '../templates/TemplatePickerModal';
 import { SettingsModal } from '../settings/SettingsModal';
 import { MetadataModal } from './MetadataModal';
+import { PageSetupModal } from './PageSetupModal';
 import { CanvasContextMenu } from './centerStage/CanvasContextMenu';
 import { CanvasShortcuts } from './centerStage/CanvasShortcuts';
 import { TouchBlockBar } from './centerStage/TouchBlockBar';
@@ -47,6 +48,7 @@ export const EditorWorkspace: React.FC = () => {
   const [readerInitialRatio, setReaderInitialRatio] = useState<ScreenRatioKey>('tablet');
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isPageSetupOpen, setIsPageSetupOpen] = useState(false);
 
   const mapViewportToRatio = (): ScreenRatioKey => {
     if (viewportMode === 'mobile') return 'mobile';
@@ -182,9 +184,10 @@ export const EditorWorkspace: React.FC = () => {
           onOpenTemplates={() => setIsTemplatesOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenMetadata={() => setMetadataOpen(true)}
+          onOpenPageSetup={() => setIsPageSetupOpen(true)}
         />
         <div className="flex-1 flex overflow-hidden relative">
-          <LeftRail />
+          <LeftRail onOpenPageSetup={() => setIsPageSetupOpen(true)} />
           <CenterStage />
           <RightRail />
         </div>
@@ -210,6 +213,7 @@ export const EditorWorkspace: React.FC = () => {
           initialRatio={readerInitialRatio}
         />
         <CanvasShortcuts />
+        <PageSetupModal isOpen={isPageSetupOpen} onClose={() => setIsPageSetupOpen(false)} />
         <TouchBlockBar />
         <CanvasContextMenu />
         <MetadataModal isOpen={isMetadataOpen} onClose={() => setMetadataOpen(false)} />

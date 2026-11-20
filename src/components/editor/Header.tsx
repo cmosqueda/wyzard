@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import { notify } from '../../store/toastStore';
 import { BackupChip } from '../ui/BackupStatus';
+import { describePageSize } from '../../utils/pageLayout';
 import { VIEWPORT_PRESETS, type ViewportMode } from '../../types/ast';
 import {
   Smartphone,
@@ -17,6 +18,7 @@ import {
   BookKey,
   ChevronDown,
   LayoutTemplate,
+  FileText,
   ZoomIn,
   ZoomOut,
   Maximize2,
@@ -39,6 +41,7 @@ interface HeaderProps {
   onOpenTemplates?: () => void;
   onOpenSettings?: () => void;
   onOpenMetadata?: () => void;
+  onOpenPageSetup?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -47,6 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenTemplates,
   onOpenSettings,
   onOpenMetadata,
+  onOpenPageSetup,
 }) => {
   const {
     project,
@@ -70,6 +74,7 @@ export const Header: React.FC<HeaderProps> = ({
     toggleThemeMode,
   } = useEditorStore();
 
+  const isFixed = project.layoutMode === 'fixed' && !!project.pageSetup;
   const [isViewportMenuOpen, setIsViewportMenuOpen] = useState(false);
   const viewportMenuRef = useRef<HTMLDivElement>(null);
 
@@ -162,14 +167,26 @@ export const Header: React.FC<HeaderProps> = ({
               title="Click to rename project"
             />
             <span className="hidden sm:block text-[10px] font-mono text-gray-500 px-1 truncate">
-              {project.chapters.length} {project.chapters.length === 1 ? 'Chapter' : 'Chapters'} •{' '}
-              {VIEWPORT_PRESETS[viewportMode].name}
+              {isFixed
+                ? `${project.chapters.length} ${project.chapters.length === 1 ? 'Page' : 'Pages'} • ${describePageSize(project.pageSetup!)}`
+                : `${project.chapters.length} ${project.chapters.length === 1 ? 'Chapter' : 'Chapters'} • ${VIEWPORT_PRESETS[viewportMode].name}`}
             </span>
           </div>
 
         </div>
 
-        {/* Center Zone: Screen Ratio / Viewport Dropdown */}
+        {/* Center Zone: Screen Ratio / Viewport Dropdown (fixed-layout books show the page size instead) */}
+        {isFixed ? (
+          <button
+            onClick={onOpenPageSetup}
+            className="flex items-center gap-2 bg-white text-neo-ink border-neo border-neo-ink px-3 py-1.5 rounded-lg shadow-neo-sm font-mono text-xs font-bold hover:bg-neo-bg transition-all"
+            title="Page setup: size, margins, numbering, header & footer, sections"
+          >
+            <FileText className="w-3.5 h-3.5" strokeWidth={2.5} />
+            <span>{describePageSize(project.pageSetup!)}</span>
+            <span className="hidden sm:inline text-[10px] text-gray-500 font-normal">Page setup</span>
+          </button>
+        ) : (
         <div ref={viewportMenuRef} className="relative">
           <button
             onClick={() => setIsViewportMenuOpen((o) => !o)}
@@ -222,6 +239,8 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
         </div>
+
+        )}
 
         {/* Right Zone: Undo/Redo, Zoom, Reader, Theme & Settings */}
         <div className="flex items-center gap-2">
@@ -360,7 +379,8 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </button>
 
-          {/* Templates Picker */}
+          {/* Templates Picker (reflowable templates; not offered for fixed-layout books) */}
+          {!isFixed && (
           <button
             onClick={onOpenTemplates}
             className="flex items-center gap-1.5 bg-white text-neo-ink border-neo border-neo-ink px-3 py-1 rounded-lg shadow-neo-sm text-xs font-mono font-bold hover:bg-neo-bg transition-all"
@@ -369,6 +389,7 @@ export const Header: React.FC<HeaderProps> = ({
             <LayoutTemplate className="w-3.5 h-3.5 text-neo-vermilion" strokeWidth={2.5} />
             <span>Templates</span>
           </button>
+          )}
         </div>
 
         {/* Center Dock: Sync Status + Hotkeys Hint */}

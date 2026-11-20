@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import { notify } from '../../store/toastStore';
+import { FIXED_PAGE_CSS } from '../../compiler/fixedPage';
 import {
   compileWebPublication,
   getWebPublicationStyles,
@@ -118,7 +119,19 @@ export const WebReaderModal: React.FC<WebReaderModalProps> = ({
     }
   }, [isOpen, project, ratioKey]);
 
-  const preset = SCREEN_RATIO_PRESETS[ratioKey] || SCREEN_RATIO_PRESETS.tablet;
+  // Fixed-layout books preview at their real page size; reflowable books use the chosen screen ratio
+  const fixedSetup = project.layoutMode === 'fixed' ? project.pageSetup : undefined;
+  const preset = fixedSetup
+    ? {
+        ...SCREEN_RATIO_PRESETS.tablet,
+        label: `Fixed page (${Math.round(fixedSetup.width)}×${Math.round(fixedSetup.height)})`,
+        shortLabel: `${Math.round(fixedSetup.width)}×${Math.round(fixedSetup.height)}`,
+        width: Math.round(fixedSetup.width),
+        height: Math.round(fixedSetup.height),
+        paddingX: fixedSetup.margins.left,
+        paddingY: fixedSetup.margins.top,
+      }
+    : SCREEN_RATIO_PRESETS[ratioKey] || SCREEN_RATIO_PRESETS.tablet;
 
   // Reset pageIndex and CBZ plate cache when ratio or project changes
   useEffect(() => {
@@ -211,6 +224,7 @@ export const WebReaderModal: React.FC<WebReaderModalProps> = ({
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
   <style>
     ${getWebPublicationStyles(project.designSystem)}
+    ${FIXED_PAGE_CSS}
     html, body {
       margin: 0;
       padding: 0;
@@ -472,7 +486,7 @@ export const WebReaderModal: React.FC<WebReaderModalProps> = ({
           </div>
 
           {/* Center Top Panel: Screen Ratio Switcher (Mobile, Tablet, Laptop, Comic, Square, Full) */}
-          {engine !== 'epub' && (
+          {engine !== 'epub' && !fixedSetup && (
             <div className="flex items-center gap-1 bg-neo-bg p-1 border-neo border-neo-ink rounded-xl shadow-neo-sm">
               {(Object.keys(SCREEN_RATIO_PRESETS) as ScreenRatioKey[]).map((key) => {
                 const cfg = SCREEN_RATIO_PRESETS[key];

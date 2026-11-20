@@ -5,6 +5,8 @@ export interface CanvasContainerProps {
   backgroundColor?: string;
   paddingY?: string;
   paddingX?: string;
+  /** Minimum height of the page body. Fixed-layout pages use 100% so the body fills the page region. */
+  minHeight?: string;
   children?: React.ReactNode;
 }
 
@@ -12,6 +14,7 @@ export const CanvasContainer: UserComponent<CanvasContainerProps> = ({
   backgroundColor = 'transparent',
   paddingY = '2rem',
   paddingX = '1.5rem',
+  minHeight = '700px',
   children,
 }) => {
   const {
@@ -24,9 +27,10 @@ export const CanvasContainer: UserComponent<CanvasContainerProps> = ({
         if (ref) connect(ref);
       }}
       data-drop-zone="true"
-      className="w-full min-h-[700px] flex flex-col gap-6 transition-all duration-200"
+      className="w-full flex flex-col gap-6 transition-all duration-200"
       style={{
         backgroundColor,
+        minHeight,
         paddingTop: paddingY,
         paddingBottom: paddingY,
         paddingLeft: paddingX,
@@ -44,6 +48,7 @@ CanvasContainer.craft = {
     backgroundColor: 'transparent',
     paddingY: '2rem',
     paddingX: '1.5rem',
+    minHeight: '700px',
   },
   rules: {
     canDrag: () => false,

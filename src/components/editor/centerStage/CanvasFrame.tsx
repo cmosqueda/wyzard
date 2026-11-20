@@ -7,6 +7,7 @@ import {
   createDefaultChapterCraftJson,
   createChapter2StarterCraftJson,
   createEmptyChapterCraftJson,
+  createFixedPageCraftJson,
 } from '../../../db';
 import { CanvasContainer } from '../../blocks/CanvasContainer';
 import { TypographyBlock } from '../../blocks/TypographyBlock';
@@ -82,6 +83,7 @@ export const CanvasFrame: React.FC = () => {
       return activeChapter.craftStateJson;
     }
     // For Chapter 2+ when empty, provide a distinct chapter layout instead of duplicating Chapter 1
+    if (project.layoutMode === 'fixed') return createFixedPageCraftJson();
     if (isPlain) return createEmptyChapterCraftJson();
     if (chapterIndex > 0) {
       return activeChapter.id === 'ch-2'
@@ -122,7 +124,7 @@ export const CanvasFrame: React.FC = () => {
     >
       <Frame data={resolvedCraftData}>
         {/* Craft.js cannot resolve a React Fragment as a block, so the two variants are separate elements */}
-        {isPlain ? (
+        {isPlain || project.layoutMode === 'fixed' ? (
           <Element is={CanvasContainer} id="page-root" canvas />
         ) : (
           <Element is={CanvasContainer} id="page-root" canvas>

@@ -1,6 +1,15 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import type { BookProject, Chapter, BookMetadata, ViewportMode, AssetAttribution, CanvasDesignSystem } from '../types/ast';
+import type {
+  BookProject,
+  Chapter,
+  BookMetadata,
+  ViewportMode,
+  AssetAttribution,
+  CanvasDesignSystem,
+  PageSetup,
+  BookSection,
+} from '../types/ast';
 import { VIEWPORT_PRESETS } from '../types/ast';
 import {
   db,
@@ -8,10 +17,17 @@ import {
   createBlankProject,
   createDefaultChapterCraftJson,
   createEmptyChapterCraftJson,
+  createFixedPageCraftJson,
   normalizeProjectChapters,
 } from '../db';
 import { syncProjectToLocalFs, deleteProjectFromLocalFs } from '../db/localFs';
 import { rehydrateProjectAssets } from '../db/assets';
+import { viewportForPageWidth } from '../utils/pageLayout';
+
+/** In fixed-layout books the responsive blocks follow the PAGE width, not the preview device. */
+function fixedViewportFor(project: BookProject): ViewportMode | null {
+  return project.layoutMode === 'fixed' && project.pageSetup ? viewportForPageWidth(project.pageSetup.width) : null;
+}
 import { notify } from './toastStore';
 
 export type WyzardThemeMode = 'light' | 'dark' | 'system';
@@ -140,6 +156,15 @@ interface EditorState {
   deleteChapter: (chapterId: string) => void;
   renameChapter: (chapterId: string, newTitle: string) => void;
   reorderChapters: (startIndex: number, endIndex: number) => void;
+  duplicateChapter: (chapterId: string) => void;
+  updateChapterMeta: (
+    chapterId: string,
+    patch: Partial<Pick<Chapter, 'title' | 'sectionId' | 'hideHeader' | 'hideFooter' | 'fullBleed'>>
+  ) => void;
+  updatePageSetup: (patch: Partial<PageSetup>) => void;
+  addSection: (section?: Partial<BookSection>) => string;
+  updateSection: (id: string, patch: Partial<BookSection>) => void;
+  deleteSection: (id: string) => void;
   updateChapterCraftState: (chapterId: string, craftJson: string) => void;
   updateProjectMetadata: (metadata: Partial<BookMetadata>) => void;
   setDesignSystem: (designSystem: CanvasDesignSystem) => void;
@@ -266,6 +291,8 @@ export const useEditorStore = create<EditorState>()(
           if (session.viewportMode && session.viewportMode in VIEWPORT_PRESETS) {
             state.viewportMode = session.viewportMode;
           }
+          const fixedVp = fixedViewportFor(restored);
+          if (fixedVp) state.viewportMode = fixedVp;
           if (typeof session.zoomLevel === 'number') {
             state.zoomLevel = Math.min(250, Math.max(25, session.zoomLevel));
           }
@@ -328,6 +355,8 @@ export const useEditorStore = create<EditorState>()(
             state.isWorkspaceOpen = false;
             state.isTransitioning = false;
             state.transitionLabel = '';
+            const fixedVp = fixedViewportFor(normalized);
+            if (fixedVp) state.viewportMode = fixedVp;
           });
           notify({
             type: 'success',
@@ -379,6 +408,8 @@ export const useEditorStore = create<EditorState>()(
             state.isWorkspaceOpen = false;
             state.isTransitioning = false;
             state.transitionLabel = '';
+            const fixedVp = fixedViewportFor(newProject);
+            if (fixedVp) state.viewportMode = fixedVp;
           });
           notify({
             type: 'success',
@@ -570,17 +601,22 @@ export const useEditorStore = create<EditorState>()(
       let createdTitle = '';
       set((state) => {
         const order = state.project.chapters.length + 1;
-        const chapterTitle = (title || '').trim() || `Chapter ${order}: Untitled`;
+        const isFixed = state.project.layoutMode === 'fixed';
+        const chapterTitle = (title || '').trim() || (isFixed ? `Page ${order}` : `Chapter ${order}: Untitled`);
         createdTitle = chapterTitle;
+        const activePage = state.project.chapters.find((c) => c.id === state.project.activeChapterId);
         const newChapter: Chapter = {
-          id: 'ch-' + Date.now(),
+          id: (isFixed ? 'pg-' : 'ch-') + Date.now(),
           title: chapterTitle,
-          slug: `chapter-${order}`,
+          slug: `${isFixed ? 'page' : 'chapter'}-${order}`,
           order,
-          craftStateJson:
-            state.project.designSystem === 'plain'
-              ? createEmptyChapterCraftJson()
-              : createDefaultChapterCraftJson(chapterTitle),
+          // a new page continues the section of the page you were on
+          ...(isFixed && activePage?.sectionId ? { sectionId: activePage.sectionId } : {}),
+          craftStateJson: isFixed
+            ? createFixedPageCraftJson()
+            : state.project.designSystem === 'plain'
+            ? createEmptyChapterCraftJson()
+            : createDefaultChapterCraftJson(chapterTitle),
           backgroundColor: '#FFFFFF',
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -592,7 +628,7 @@ export const useEditorStore = create<EditorState>()(
       get().saveProjectToDb();
       notify({
         type: 'success',
-        title: 'Chapter Added to Spine',
+        title: get().project.layoutMode === 'fixed' ? 'Page Added' : 'Chapter Added to Spine',
         message: `Created "${createdTitle}".`,
       });
     },
@@ -641,6 +677,89 @@ export const useEditorStore = create<EditorState>()(
           ch.updatedAt = Date.now();
           state.project.updatedAt = Date.now();
         }
+      });
+      get().saveProjectToDb();
+    },
+
+    duplicateChapter: (chapterId) => {
+      const src = get().project.chapters.find((c) => c.id === chapterId);
+      if (!src) return;
+      get().pushHistorySnapshot();
+      const isFixed = get().project.layoutMode === 'fixed';
+      set((state) => {
+        const idx = state.project.chapters.findIndex((c) => c.id === chapterId);
+        const copy: Chapter = {
+          ...JSON.parse(JSON.stringify(src)),
+          id: (isFixed ? 'pg-' : 'ch-') + Date.now(),
+          title: `${src.title} (copy)`,
+          slug: `${src.slug}-copy`,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        state.project.chapters.splice(idx + 1, 0, copy);
+        state.project.chapters.forEach((c, i) => (c.order = i + 1));
+        state.project.activeChapterId = copy.id;
+        state.project.updatedAt = Date.now();
+      });
+      get().saveProjectToDb();
+    },
+
+    updateChapterMeta: (chapterId, patch) => {
+      get().pushHistorySnapshot();
+      set((state) => {
+        const ch = state.project.chapters.find((c) => c.id === chapterId);
+        if (!ch) return;
+        Object.entries(patch).forEach(([k, v]) => {
+          if (v === undefined || v === false || v === '') delete (ch as unknown as Record<string, unknown>)[k];
+          else (ch as unknown as Record<string, unknown>)[k] = v;
+        });
+        ch.updatedAt = Date.now();
+        state.project.updatedAt = Date.now();
+      });
+      get().saveProjectToDb();
+    },
+
+    updatePageSetup: (patch) => {
+      get().pushHistorySnapshot();
+      set((state) => {
+        if (!state.project.pageSetup) return;
+        state.project.pageSetup = { ...state.project.pageSetup, ...patch };
+        state.project.updatedAt = Date.now();
+        const vp = fixedViewportFor(state.project);
+        if (vp) state.viewportMode = vp;
+      });
+      get().saveProjectToDb();
+    },
+
+    addSection: (section) => {
+      const id = 'sec-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
+      get().pushHistorySnapshot();
+      set((state) => {
+        const list = state.project.sections || (state.project.sections = []);
+        list.push({ id, title: 'New section', ...section });
+        state.project.updatedAt = Date.now();
+      });
+      get().saveProjectToDb();
+      return id;
+    },
+
+    updateSection: (id, patch) => {
+      set((state) => {
+        const sec = state.project.sections?.find((x) => x.id === id);
+        if (sec) Object.assign(sec, patch);
+        state.project.updatedAt = Date.now();
+      });
+      get().saveProjectToDb();
+    },
+
+    deleteSection: (id) => {
+      get().pushHistorySnapshot();
+      set((state) => {
+        state.project.sections = (state.project.sections || []).filter((x) => x.id !== id);
+        state.project.chapters.forEach((c) => {
+          if (c.sectionId === id) delete c.sectionId;
+        });
+        state.project.updatedAt = Date.now();
       });
       get().saveProjectToDb();
     },

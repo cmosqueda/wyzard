@@ -83,6 +83,19 @@ export const ProjectInspector: React.FC = () => {
 
       <div>
         <label className="font-heading font-semibold block mb-1 text-neo-ink uppercase tracking-wider text-[11px]">
+          Short Title (running header / footer)
+        </label>
+        <input
+          type="text"
+          value={project.metadata.shortTitle || ''}
+          onChange={(e) => updateProjectMetadata({ shortTitle: e.target.value })}
+          placeholder={project.metadata.title}
+          className="w-full bg-white border-neo border-neo-ink px-2.5 py-1.5 rounded font-mono text-xs focus:outline-none focus:ring-1 focus:ring-neo-ink shadow-neo-sm"
+        />
+      </div>
+
+      <div>
+        <label className="font-heading font-semibold block mb-1 text-neo-ink uppercase tracking-wider text-[11px]">
           Author / Publisher
         </label>
         <input
