@@ -5,6 +5,7 @@ import { parseCraftState, type ParsedBlockNode } from './astParser';
 import { getArtboardHeightRatio } from '../utils/artboard';
 import { extractMath, renderMathInText, unescapeHtml } from '../utils/math';
 import { getExportContext, withExportContext } from './exportContext';
+import { createEpubAssetBundler } from './epubAssets';
 import { renderFixedPageHtml, FIXED_PAGE_CSS } from './fixedPage';
 import { titlePageHtml, copyrightHtml, tocHtml, termsHtml, BOOK_FEATURES_EPUB_CSS } from './bookFeaturesHtml';
 import { buildTocEntries, getPrintedNumber } from '../utils/pageLayout';
@@ -786,19 +787,23 @@ export async function exportToEpub(project: BookProject, options: EpubExportOpti
   if (cover) zip.file(`OEBPS/images/${cover.file}`, cover.data);
   const hasCoverPage = project.chapters.some((c) => c.kind === 'cover');
 
-  // 4. Chapter XHTML documents
+  // 4. Chapter XHTML documents (uploaded images / audio are copied into the package)
+  const bundler = createEpubAssetBundler();
   const chapterEntries: { id: string; filename: string; title: string; hasMath?: boolean }[] = [];
-  project.chapters.forEach((chapter, idx) => {
+  for (let idx = 0; idx < project.chapters.length; idx++) {
+    const chapter = project.chapters[idx];
     const filename = `chapter-${idx + 1}.xhtml`;
     const chapterXml = buildChapterXhtml(chapter, project, idx, cover?.file, fixedLayout);
-    zip.file(`OEBPS/chapters/${filename}`, chapterXml);
+    zip.file(`OEBPS/chapters/${filename}`, await bundler.rewrite(chapterXml));
     chapterEntries.push({
       id: `chapter-${idx + 1}`,
       filename,
       title: chapter.title,
       hasMath: chapterXml.includes('<math'),
     });
-  });
+  }
+  const bundledAssets = bundler.assets();
+  bundledAssets.forEach((a) => zip.file(`OEBPS/${a.href}`, a.data));
 
   // Cover page document for books that have a cover image but no designed cover page
   const needsCoverDoc = !!cover && !hasCoverPage;
@@ -939,6 +944,7 @@ export async function exportToEpub(project: BookProject, options: EpubExportOpti
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
     ${cover ? `<item id="cover-image" href="images/${cover.file}" media-type="${cover.mime}" properties="cover-image"/>` : ''}
     ${needsCoverDoc ? '<item id="cover-doc" href="chapters/cover.xhtml" media-type="application/xhtml+xml"/>' : ''}
+    ${bundledAssets.map((a, i) => `<item id="media-${i + 1}" href="${a.href}" media-type="${a.mime}"/>`).join('\n    ')}
     ${chapterEntries
       .map(
         (c) => `

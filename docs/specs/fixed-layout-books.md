@@ -1,6 +1,6 @@
 # Spec: Fixed-layout books and book features
 
-Status: phases 1, 2 and 3 implemented
+Status: phases 1 to 3 implemented · phase 4 in progress (4.1 to 4.4 done)
 Owner: Rocket Puncher · Last updated: 2026-11-20
 
 ## 1. Why
@@ -51,6 +51,7 @@ Non-goals (for now)
 | 1 | Fixed-layout project type, page sizes (editable), manual pages, margins and guides, running header and footer designer with tokens, sections, page numbering, HTML / PDF / CBZ export of authored pages | Done |
 | 2 | Book-feature pages and smart blocks, automatic table of contents with links, numbering runs, section levels, EPUB cover, landmarks, nested navigation and page list | Done |
 | 3 | Fixed-layout EPUB (pre-paginated), print PDF with bleed and crop marks, facing pages with left / right masters and first-page variants, index and glossary, textbook starter template | Done |
+| 4 | Closing the gaps: images inside EPUBs, overflow to new pages, per-side master pages, a better index, direct PDF download | 4.1 to 4.4 done, 4.5 planned |
 
 ## 4. Data model
 
@@ -74,7 +75,7 @@ PageSetup {
   sectionStart?: { hideHeader?, hideFooter? }   // phase 3: variant for the first page of a section
 }
 
-BookTerm { id, term, definition?, inIndex? }
+BookTerm { id, term, definition?, inIndex?, parent?, aliases?, seeAlso?, auto? }   // phase 4: see 4.4
 
 HeaderFooterZone { enabled, height, background, color, borderColor, borderWidth, left?, center?, right? }
 ZoneSlot { text (with tokens), size?, bold?, color?, bg?, padX? }
@@ -239,19 +240,79 @@ opener. The Textbook band header and footer from phase 1 are used. Every page ca
 6. The textbook starter opens with its sections, numbering runs, contents, glossary and index filled in.
 7. Reflowable projects and fixed books without these options behave as before.
 
-### 7.7 Follow-ups
-- Automatic text flow and a "move overflow to a new page" helper.
-- Explicit per-side master pages (different content on left and right, rather than mirroring).
-- Index terms tagged inside the text, sub-entries and "see also".
-- Bundling uploaded (`blob:`) images inside EPUBs.
-- A true PDF writer (the print window relies on the browser's "Save as PDF").
+### 7.7 Follow-ups (now phase 4)
+See section 7.8.
+
+## 7.8 Phase 4: closing the gaps
+
+### 4.1 Uploaded images and audio inside EPUBs (done)
+Uploaded files are referenced in pages as `blob:…#wzasset=<id>` URLs, which are meaningless inside an `.epub`.
+When exporting, `createEpubAssetBundler` scans every generated XHTML document for those URLs, reads the files from
+the project's stored assets, writes them to `images/asset-N.ext` (or `media/` for audio and video), adds them to the
+manifest and rewrites the references to `../images/asset-N.ext`. It applies to reflowable and fixed-layout EPUBs.
+Assets that were deleted from storage keep their old URL and are skipped.
+
+Acceptance: an EPUB of a page with an uploaded image contains the image file, a manifest item with the right media
+type, a relative `src`, and no `blob:` URL; all XHTML still parses.
+
+### 4.2 Move overflow to new pages (done)
+When a page's content runs past the body, the overflow chip gets a **Move overflow to new page(s)** button.
+- The blocks (top-level nodes with their children) are measured in the editor and packed in order, page by page, by
+  height and the page's block spacing. The first page keeps what fits; every continuation page fits as well.
+- Continuations are inserted right after the page, titled "<title> (cont.)" (or "(cont. 1)", "(cont. 2)" …), and keep
+  the section and background. They are plain content pages: no full bleed, kind, contents entry or numbering restart.
+- A block that does not fit on a page by itself gets a page of its own; if nothing can move the editor says so.
+- One undo step restores the original page.
+
+Acceptance: a page with ten paragraphs and an image splits into pages with no overflow warning; the moved blocks are
+saved on the new pages and gone from the first page.
+
+### 4.3 Per-side master pages (done)
+`PageSetup.masters` is a list of named masters: `{ id, name, side?, header?, footer?, margins? }`. Anything a master
+leaves out follows the book's page setup.
+- Page setup, **Masters** tab: add masters, name them, choose their side (left pages, right pages or pick manually),
+  and switch on an own header, own footer and / or own margins (each starts as a copy of the book's setting).
+- Which master a page uses, first match wins: the page's `masterId` (Pages rail, Page options, Master page), then its
+  section's `masterId` (Sections tab), then, with facing pages on, the first master made for the page's side.
+  A page with no master uses the book setup, mirrored on left-hand pages when facing pages is on.
+- An explicit master replaces the automatic mirroring. The "hide on section start" rules still apply on top.
+- The editor, HTML, PDF, print PDF, EPUB and CBZ all resolve a page through `getEffectiveSetup`, so they agree.
+
+Acceptance: with facing pages on and a left master that has a 90 px left margin, left-hand pages place their body at
+90 px and right-hand pages at the book margin; picking that master on a right-hand page moves its body to 90 px too.
+
+### 4.4 Better index (done)
+- **Page ranges:** consecutive pages merge into one range ("12–14"); every range links to its first page. Ranges use
+  printed page numbers, so "iv–v" and "3–4" read correctly across numbering runs.
+- **Sub-entries:** a term can be a sub-entry of a main term (`BookTerm.parent`). Sub-entries are listed indented under
+  their main entry, alphabetically. A main entry with no pages of its own is still listed when it has sub-entries.
+  Only main entries start a letter group.
+- **See also:** `BookTerm.seeAlso` (comma-separated) prints "See also …" after the page numbers; a term with only
+  "see also" text is listed as a cross-reference.
+- **Other spellings:** `BookTerm.aliases` ("rhymes, rhyming") are searched in the text as well as the term.
+- **Tagging:** Page options, "Index terms tagged on this page", lists a term on that page even if the text does not
+  contain it (`Chapter.indexTerms`). Turning off "Find in the text automatically" on a term (`auto: false`) lists it
+  only on tagged pages. Tagging works per page; it does not mark individual words inside the text.
+- **Leaving pages out:** "Leave this page out of the index" (`Chapter.noIndex`) skips the page's text and tags.
+- Rendered the same way in the editor, HTML, PDF, EPUB and CBZ.
+
+Acceptance: with terms rhyme, rhythm, stanza and a sub-entry "beat" under rhythm, the index shows "rhythm, 2–4, 6 …
+See also meter, verse" followed by the indented "beat, 3–4"; leaving a page out removes it from every entry; tagging
+adds the page to the term's list.
+
+### 4.5 Direct PDF download (planned)
+A built-in PDF writer so the print PDF downloads without the browser print dialog, with exact trim and bleed boxes.
+
+### 4.6 Other follow-ups
+- Optional automatic text flow.
+- Import an existing PDF as page images.
+- A validation pass for fixed books (EPUB checks, low-resolution images, content inside the bleed).
 
 ## 8. Risks and notes
 
 - Authored pages are clipped at the page edge in exports; the editor warns about overflow instead of clipping.
 - Text in the editor and in exports is laid out by the browser, so line breaks can differ by a few pixels
   between the two.
-- Uploaded images referenced as `blob:` URLs are not bundled into EPUBs yet. The cover is rasterised for that
-  reason, but images inside other pages need bundling (tracked separately).
+- Remote (`http`) images are not downloaded into EPUBs; they stay as links and need a connection to show.
 - The in-app Reader previews rely on inline scripts, which the browser extension's content security policy blocks.
   Exported files are unaffected.

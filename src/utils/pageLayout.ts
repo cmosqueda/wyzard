@@ -5,6 +5,7 @@ import type {
   PageNumbering,
   PageSetup,
   BookSection,
+  PageMaster,
   ZoneSlot,
 } from '../types/ast';
 
@@ -390,13 +391,40 @@ export function isSectionStart(project: BookProject, pageIndex: number): boolean
 }
 
 /**
+ * The master page for a page: the one picked on the page, else the one picked on its section, else (with facing
+ * pages) the first master made for its side. Undefined means the book's own setup applies.
+ */
+export function pickMaster(project: BookProject, pageIndex: number): PageMaster | undefined {
+  const setup = project.pageSetup;
+  const masters = setup?.masters;
+  if (!setup || !masters || masters.length === 0) return undefined;
+  const page = project.chapters[pageIndex];
+  if (!page) return undefined;
+  const byId = (id?: string) => (id ? masters.find((m) => m.id === id) : undefined);
+  const picked = byId(page.masterId) || byId(findSection(project, page)?.masterId);
+  if (picked) return picked;
+  if (!setup.facing) return undefined;
+  const side = isLeftPage(setup, pageIndex) ? 'left' : 'right';
+  return masters.find((m) => m.side === side);
+}
+
+/**
  * The page setup that applies to one page after master-page rules: mirrored margins and zones on
  * left-hand pages, and the section-opener variant. Everything that lays out or draws a page uses this.
  */
 export function getEffectiveSetup(project: BookProject, pageIndex: number): PageSetup {
   const setup = project.pageSetup!;
   let out = setup;
-  if (isLeftPage(setup, pageIndex)) {
+  const master = pickMaster(project, pageIndex);
+  if (master) {
+    // an explicit master replaces the automatic mirroring
+    out = {
+      ...out,
+      margins: master.margins ?? out.margins,
+      header: master.header ?? out.header,
+      footer: master.footer ?? out.footer,
+    };
+  } else if (isLeftPage(setup, pageIndex)) {
     out = {
       ...out,
       margins: { ...out.margins, left: out.margins.right, right: out.margins.left },

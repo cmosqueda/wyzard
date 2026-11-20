@@ -90,37 +90,100 @@ export function getPageText(craftStateJson: string): string {
 
 const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-export interface IndexPageRef {
+export interface IndexRange {
+  /** Printed label: "12" or "12–14" (consecutive pages) */
+  label: string;
   pageIndex: number;
   pageId: string;
-  printed: string;
 }
 export interface IndexEntry {
   id: string;
   term: string;
-  pages: IndexPageRef[];
+  /** 0 = main entry, 1 = sub-entry under a main entry */
+  level: 0 | 1;
+  ranges: IndexRange[];
+  /** Free text from the term's "see also" field, split at commas */
+  seeAlso: string[];
 }
 
-/** Alphabetical index: every term (not turned off) with the pages whose text contains it. */
+/** Pages whose text (or page tags) mention the term, as a sorted list of page indexes. */
+function pagesForTerm(
+  project: BookProject,
+  term: NonNullable<BookProject['terms']>[number],
+  texts: string[]
+): number[] {
+  const words = [term.term, ...(term.aliases || '').split(',')].map((w) => w.trim()).filter(Boolean);
+  const re =
+    term.auto === false || words.length === 0
+      ? null
+      : new RegExp(`(^|[^\\p{L}\\p{N}])(${words.map(escapeRe).join('|')})(?![\\p{L}\\p{N}])`, 'iu');
+  const out: number[] = [];
+  project.chapters.forEach((c, i) => {
+    if (c.noIndex) return;
+    const tagged = !!c.indexTerms?.includes(term.id);
+    if (tagged || (re && texts[i] && re.test(texts[i]))) out.push(i);
+  });
+  return out;
+}
+
+/** Merges runs of consecutive pages into ranges ("12–14"); every range links to its first page. */
+export function toIndexRanges(project: BookProject, pages: number[]): IndexRange[] {
+  const ranges: IndexRange[] = [];
+  let i = 0;
+  while (i < pages.length) {
+    let j = i;
+    while (j + 1 < pages.length && pages[j + 1] === pages[j] + 1) j++;
+    const first = getPrintedNumber(project, pages[i]) || String(pages[i] + 1);
+    const last = getPrintedNumber(project, pages[j]) || String(pages[j] + 1);
+    ranges.push({
+      label: j > i && first !== last ? `${first}–${last}` : first,
+      pageIndex: pages[i],
+      pageId: project.chapters[pages[i]].id,
+    });
+    i = j + 1;
+  }
+  return ranges;
+}
+
+const byTerm = (a: { term: string }, b: { term: string }) => a.term.localeCompare(b.term, undefined, { sensitivity: 'base' });
+
+/**
+ * Alphabetical index with sub-entries: main entries sorted, each followed by its sub-entries. A term is listed when
+ * it appears on pages (found in the text, or tagged on the page), or has "see also" text, or has listed sub-entries.
+ */
 export function buildIndexEntries(project: BookProject): IndexEntry[] {
   const terms = (project.terms || []).filter((t) => t.term.trim() && t.inIndex !== false);
   if (terms.length === 0) return [];
   const texts = project.chapters.map((c) => {
     const skip = c.kind && !['content', 'preface'].includes(c.kind);
-    return skip ? '' : getPageText(c.craftStateJson);
+    return skip || c.noIndex ? '' : getPageText(c.craftStateJson);
   });
-  return terms
-    .map((t) => {
-      const word = t.term.trim();
-      const re = new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRe(word)}(?![\\p{L}\\p{N}])`, 'iu');
-      const pages: IndexPageRef[] = [];
-      texts.forEach((txt, i) => {
-        if (txt && re.test(txt)) pages.push({ pageIndex: i, pageId: project.chapters[i].id, printed: getPrintedNumber(project, i) });
-      });
-      return { id: t.id, term: word, pages };
-    })
-    .filter((e) => e.pages.length > 0)
-    .sort((a, b) => a.term.localeCompare(b.term, undefined, { sensitivity: 'base' }));
+  const make = (t: (typeof terms)[number], level: 0 | 1): IndexEntry => ({
+    id: t.id,
+    term: t.term.trim(),
+    level,
+    ranges: toIndexRanges(project, pagesForTerm(project, t, texts)),
+    seeAlso: (t.seeAlso || '').split(',').map((s) => s.trim()).filter(Boolean),
+  });
+  const ids = new Set(terms.map((t) => t.id));
+  const isChild = (t: (typeof terms)[number]) => !!t.parent && t.parent !== t.id && ids.has(t.parent);
+  const mains = terms.filter((t) => !isChild(t));
+
+  const out: IndexEntry[] = [];
+  for (const m of mains) {
+    const entry = make(m, 0);
+    const kids = terms
+      .filter((t) => isChild(t) && t.parent === m.id)
+      .map((t) => make(t, 1))
+      .filter((k) => k.ranges.length > 0 || k.seeAlso.length > 0)
+      .sort(byTerm);
+    if (entry.ranges.length === 0 && entry.seeAlso.length === 0 && kids.length === 0) continue;
+    out.push(entry, ...kids);
+  }
+  // keep main entries alphabetical, each followed by its sub-entries
+  const groups: IndexEntry[][] = [];
+  out.forEach((e) => (e.level === 0 ? groups.push([e]) : groups[groups.length - 1].push(e)));
+  return groups.sort((a, b) => byTerm(a[0], b[0])).flat();
 }
 
 export interface GlossaryEntry {

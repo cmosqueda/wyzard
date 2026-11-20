@@ -42,6 +42,11 @@ export async function rehydrateProjectAssets(project: BookProject): Promise<Book
   return next === json ? project : (JSON.parse(next) as BookProject);
 }
 
+/** Replaces every uploaded-asset URL in `text`; return undefined to keep one as it is. */
+export function replaceAssetUrls(text: string, replacement: (assetId: string) => string | undefined): string {
+  return text.replace(ASSET_URL_RE, (whole, id: string) => replacement(id) ?? whole);
+}
+
 // Cache for Object URLs created from IndexedDB Blobs
 const blobUrlCache = new Map<string, string>();
 const MAX_ASSET_BYTES = 25 * 1024 * 1024; // 25 MB limit

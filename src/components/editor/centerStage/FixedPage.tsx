@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ArrowDownToLine } from 'lucide-react';
+import { useEditor, ROOT_NODE } from '@craftjs/core';
+import { useEditorStore } from '../../../store/editorStore';
+import { notify } from '../../../store/toastStore';
+import { splitOverflowNodes } from '../../../utils/pageOverflow';
 import type { Chapter, HeaderFooterZone, PageSetup, ZoneSlot } from '../../../types/ast';
 import {
   getPageContext,
@@ -116,6 +120,33 @@ export const FixedPageStage: React.FC<FixedPageStageProps> = ({
   const ctx = getPageContext(project, pageIndex);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [overflowPx, setOverflowPx] = useState(0);
+  const { query } = useEditor();
+  const splitPageOverflow = useEditorStore((s) => s.splitPageOverflow);
+
+  /** Moves the blocks that don't fit this page's body onto a new page right after it. */
+  const moveOverflowToNewPage = () => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const bodyHeight = body.getBoundingClientRect().height;
+    const ids: string[] = query.node(ROOT_NODE).get().data.nodes || [];
+    const rects = ids.map((id) => query.node(id).get().dom?.getBoundingClientRect());
+    const result = splitOverflowNodes(
+      ids,
+      rects.map((r) => r?.top ?? 0),
+      rects.map((r) => r?.bottom ?? 0),
+      bodyHeight,
+      query.getSerializedNodes() as never
+    );
+    if (!result) {
+      notify({
+        type: 'warning',
+        title: 'Nothing to move',
+        message: 'A single block is taller than the page. Shrink it or split its content by hand.',
+      });
+      return;
+    }
+    splitPageOverflow(page.id, result.keepJson, result.movedPages);
+  };
 
   // Watch the body for content that no longer fits the page
   useEffect(() => {
@@ -205,6 +236,15 @@ export const FixedPageStage: React.FC<FixedPageStageProps> = ({
           >
             <AlertTriangle className="w-3 h-3" />
             Content overflows by {overflowPx}px
+            <button
+              type="button"
+              onClick={moveOverflowToNewPage}
+              className="ml-1 flex items-center gap-1 px-1.5 py-0.5 rounded bg-white text-red-700 hover:bg-red-50"
+              data-move-overflow
+            >
+              <ArrowDownToLine className="w-3 h-3" />
+              Move overflow to new page(s)
+            </button>
           </span>
         )}
       </div>

@@ -56,28 +56,42 @@ export const TermsBlock: UserComponent<TermsBlockProps> = ({ variant = 'index', 
       {variant === 'index' &&
         index.map((e, i) => {
           const letter = e.term[0]?.toUpperCase() || '';
-          const showLetter = groupByLetter && (i === 0 || index[i - 1].term[0]?.toUpperCase() !== letter);
+          let prevMain = '';
+          for (let k = i - 1; k >= 0; k--) {
+            if (index[k].level === 0) {
+              prevMain = index[k].term[0]?.toUpperCase() || '';
+              break;
+            }
+          }
+          const showLetter = groupByLetter && e.level === 0 && (i === 0 || prevMain !== letter);
           return (
             <div key={e.id} style={{ breakInside: 'avoid' }}>
               {showLetter && <div style={{ fontWeight: 800, marginTop: 10, fontSize: fontSize + 2 }}>{letter}</div>}
-              <div style={{ margin: '2px 0' }}>
-                {e.term},{' '}
-                {e.pages.map((pg, k) => (
-                  <span key={pg.pageId}>
+              <div style={{ margin: '2px 0', paddingLeft: e.level === 1 ? 14 : 0 }}>
+                {e.term}
+                {e.ranges.length > 0 && ', '}
+                {e.ranges.map((r, k) => (
+                  <span key={r.pageId}>
                     {k > 0 && ', '}
                     <button
                       type="button"
                       onClick={(ev) => {
                         ev.stopPropagation();
-                        setActiveChapter(pg.pageId);
+                        setActiveChapter(r.pageId);
                       }}
                       className="underline decoration-dotted hover:bg-black/5"
-                      title={`Go to page ${pg.pageIndex + 1}`}
+                      title={`Go to page ${r.pageIndex + 1}`}
                     >
-                      {pg.printed || pg.pageIndex + 1}
+                      {r.label}
                     </button>
                   </span>
                 ))}
+                {e.seeAlso.length > 0 && (
+                  <span>
+                    {e.ranges.length > 0 ? '. ' : ', '}
+                    <em>See also</em> {e.seeAlso.join(', ')}
+                  </span>
+                )}
               </div>
             </div>
           );

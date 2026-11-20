@@ -48,9 +48,11 @@ Choose **Fixed-layout book** when creating a project to design like a traditiona
 - **Automatic table of contents:** built from your sections and from pages you mark "Include in table of contents", with levels (part, chapter, lesson), dot leaders, chapter labels and real printed page numbers. Every entry is a link to its page in the HTML reader, the HTML pack, the PDF and the EPUB.
 - **Page-number runs:** restart numbering anywhere (roman front matter, then arabic from 1).
 - **Exports from your pages:** HTML, PDF and CBZ keep each page exactly as laid out. EPUB gets a cover image (uploaded, or rendered from your cover page), a nested navigation document, landmarks and a page list, and can be exported as a **fixed-layout (pre-paginated) EPUB** so every page looks as designed.
-- **Master pages:** facing pages with inner / outer margins and mirrored header and footer slots, and a variant for the first page of each section.
+- **Master pages:** facing pages with inner / outer margins and mirrored header and footer slots, a variant for the first page of each section, and named master pages (own header, footer and margins) for left pages, right pages, a section or a single page.
 - **Print-ready PDF:** bleed (3, 5 or 6 mm), crop marks, facing-page spreads and safe-area guides, from Export.
-- **Index and glossary:** add terms in Page setup; the Index lists the pages each term appears on (with links) and the Glossary lists definitions.
+- **Index and glossary:** add terms in Page setup; the Index lists the pages each term appears on (with links, merged into ranges like 12–14), with sub-entries, “See also” cross-references, alternate spellings, page tagging and pages you can leave out. The Glossary lists definitions.
+- **Overflow helper:** when a page runs past its body, one click moves the extra blocks onto as many new pages as needed.
+- **Images in EPUB:** uploaded images and audio are packaged inside the `.epub`.
 - **Textbook starter:** a ready-made fixed-layout textbook (cover, contents, unit and chapter openers, lessons, activity, reflection, glossary, index) to edit.
 
 Design notes and the full plan live in [`docs/specs/fixed-layout-books.md`](docs/specs/fixed-layout-books.md).

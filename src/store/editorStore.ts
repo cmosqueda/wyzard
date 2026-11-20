@@ -163,10 +163,11 @@ interface EditorState {
   updateChapterMeta: (
     chapterId: string,
     patch: Partial<
-      Pick<Chapter, 'title' | 'sectionId' | 'hideHeader' | 'hideFooter' | 'fullBleed' | 'kind' | 'tocEntry' | 'numbering'>
+      Pick<Chapter, 'title' | 'sectionId' | 'masterId' | 'noIndex' | 'indexTerms' | 'hideHeader' | 'hideFooter' | 'fullBleed' | 'kind' | 'tocEntry' | 'numbering'>
     >
   ) => void;
   addBookPage: (kind: Exclude<PageKind, 'content'>) => void;
+  splitPageOverflow: (chapterId: string, keepJson: string, movedPages: string[]) => void;
   updatePageSetup: (patch: Partial<PageSetup>) => void;
   addSection: (section?: Partial<BookSection>) => string;
   updateSection: (id: string, patch: Partial<BookSection>) => void;
@@ -767,6 +768,44 @@ export const useEditorStore = create<EditorState>()(
       });
       get().saveProjectToDb();
       notify({ type: 'success', title: `${kit?.label} added`, duration: 1800 });
+    },
+
+    splitPageOverflow: (chapterId, keepJson, movedPages) => {
+      get().pushHistorySnapshot();
+      let firstNewId = '';
+      set((state) => {
+        const list = state.project.chapters;
+        const idx = list.findIndex((c) => c.id === chapterId);
+        if (idx < 0) return;
+        const src = list[idx];
+        src.craftStateJson = keepJson;
+        src.updatedAt = Date.now();
+        const base = src.title.replace(/\s*\(cont\.( \d+)?\)$/, '');
+        // continuations keep the section and look of the page, but are plain content pages
+        const created: Chapter[] = movedPages.map((json, n) => ({
+          id: 'pg-' + Date.now().toString(36) + n + Math.random().toString(36).slice(2, 5),
+          title: movedPages.length > 1 ? `${base} (cont. ${n + 1})` : `${base} (cont.)`,
+          slug: `${src.slug}-cont-${n + 1}`,
+          order: idx + 2 + n,
+          craftStateJson: json,
+          backgroundColor: src.backgroundColor,
+          ...(src.sectionId ? { sectionId: src.sectionId } : {}),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }));
+        list.splice(idx + 1, 0, ...created);
+        list.forEach((c, i) => (c.order = i + 1));
+        firstNewId = created[0]?.id || '';
+        state.project.activeChapterId = firstNewId || chapterId;
+        state.project.updatedAt = Date.now();
+      });
+      get().saveProjectToDb();
+      notify({
+        type: 'success',
+        title: movedPages.length === 1 ? 'Moved to a new page' : `Moved to ${movedPages.length} new pages`,
+        message: 'The overflowing blocks now continue on the pages after this one.',
+        duration: 2400,
+      });
     },
 
     updatePageSetup: (patch) => {

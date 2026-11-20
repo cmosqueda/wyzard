@@ -1570,7 +1570,9 @@ export async function renderPageGrabToCanvasDataUrl(
           for (const e of buildIndexEntries(project)) {
             if (curY + fs * 1.5 > maxBottomY) break;
             ctx.font = `400 ${fs}px ${T.sans}`;
-            curY = drawWrappedText(ctx, `${e.term}, ${e.pages.map((x) => x.printed || x.pageIndex + 1).join(', ')}`, padX, curY, contentW, fs * 1.45, 3) + 3;
+            const nums = e.ranges.map((r) => r.label).join(', ');
+            const see = e.seeAlso.length ? `${nums ? '. ' : ', '}See also ${e.seeAlso.join(', ')}` : '';
+            curY = drawWrappedText(ctx, `${e.term}${nums ? ', ' + nums : ''}${see}`, padX + (e.level === 1 ? 14 : 0), curY, contentW - (e.level === 1 ? 14 : 0), fs * 1.45, 3) + 3;
           }
         }
         curY += 8;

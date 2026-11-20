@@ -221,6 +221,24 @@ export const PageRail: React.FC<{ onOpenPageSetup: () => void }> = ({ onOpenPage
               ))}
             </select>
           </label>
+          {(project.pageSetup?.masters || []).length > 0 && (
+            <label className="flex flex-col text-[10px] text-gray-500">
+              Master page
+              <select
+                value={active.masterId || ''}
+                onChange={(e) => updateChapterMeta(active.id, { masterId: e.target.value || undefined })}
+                className="mt-0.5 bg-white border border-neo-ink px-1.5 py-1 rounded text-xs text-neo-ink"
+                aria-label="Master page"
+              >
+                <option value="">Automatic</option>
+                {(project.pageSetup?.masters || []).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {sections.length === 0 && (
             <button onClick={onOpenPageSetup} className="text-left text-[10px] underline text-gray-600 hover:text-neo-vermilion">
               Create sections in Page setup →
@@ -286,6 +304,46 @@ export const PageRail: React.FC<{ onOpenPageSetup: () => void }> = ({ onOpenPage
                   <option value={3}>Level 3</option>
                 </select>
               </div>
+            )}
+            {(project.terms || []).length > 0 && (
+              <>
+                <label className="flex items-center gap-2 text-neo-ink cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!active.noIndex}
+                    onChange={(e) => updateChapterMeta(active.id, { noIndex: e.target.checked })}
+                    className="accent-neo-ink"
+                    aria-label="Leave out of index"
+                  />
+                  Leave this page out of the index
+                </label>
+                {!active.noIndex && (
+                  <details className="text-neo-ink" data-index-tags>
+                    <summary className="cursor-pointer text-[10px] text-gray-600">
+                      Index terms tagged on this page ({(active.indexTerms || []).length})
+                    </summary>
+                    <div className="flex flex-col gap-1 pl-1 pt-1 max-h-28 overflow-y-auto">
+                      {(project.terms || [])
+                        .filter((t) => t.term.trim())
+                        .map((t) => (
+                          <label key={t.id} className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!!active.indexTerms?.includes(t.id)}
+                              onChange={(e) => {
+                                const cur = active.indexTerms || [];
+                                const next = e.target.checked ? [...cur, t.id] : cur.filter((x) => x !== t.id);
+                                updateChapterMeta(active.id, { indexTerms: next.length ? next : undefined });
+                              }}
+                              className="accent-neo-ink"
+                            />
+                            {t.term}
+                          </label>
+                        ))}
+                    </div>
+                  </details>
+                )}
+              </>
             )}
             <label className="flex items-center gap-2 text-neo-ink cursor-pointer">
               <input

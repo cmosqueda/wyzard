@@ -106,12 +106,16 @@ export function termsHtml(
   const entries = buildIndexEntries(project);
   const group = p.groupByLetter ?? true;
   let html = '';
-  entries.forEach((e, i) => {
+  let lastLetter = '';
+  entries.forEach((e) => {
     const letter = e.term[0]?.toUpperCase() || '';
-    if (group && (i === 0 || entries[i - 1].term[0]?.toUpperCase() !== letter)) html += `<div class="wz-ix-letter">${esc(letter)}</div>`;
-    html += `<div class="wz-ix-item">${esc(e.term)}, ${e.pages
-      .map((pg) => `<a href="${esc(hrefFor(pg.pageIndex, pg.pageId))}" data-wz-page="${esc(pg.pageId)}">${esc(pg.printed || String(pg.pageIndex + 1))}</a>`)
-      .join(', ')}</div>`;
+    if (group && e.level === 0 && letter !== lastLetter) html += `<div class="wz-ix-letter">${esc(letter)}</div>`;
+    if (e.level === 0) lastLetter = letter;
+    const links = e.ranges
+      .map((r) => `<a href="${esc(hrefFor(r.pageIndex, r.pageId))}" data-wz-page="${esc(r.pageId)}">${esc(r.label)}</a>`)
+      .join(', ');
+    const see = e.seeAlso.length ? `${links ? '. ' : ', '}<em>See also</em> ${e.seeAlso.map(esc).join(', ')}` : '';
+    html += `<div class="wz-ix-item${e.level === 1 ? ' wz-ix-sub' : ''}">${esc(e.term)}${links ? ', ' + links : ''}${see}</div>`;
   });
   return `<div class="wz-index" style="font-size:${fs}px;${colStyle}">${html || '<p>(No index entries yet)</p>'}</div>`;
 }
@@ -120,6 +124,7 @@ export function termsHtml(
 export const BOOK_FEATURES_CSS = `
 .wz-ix-letter { font-weight: 800; margin-top: 10px; break-after: avoid; }
 .wz-ix-item { break-inside: avoid; margin: 2px 0; }
+.wz-ix-sub { padding-left: 14px; }
 .wz-index a { color: inherit; }
 .wz-gl-item { break-inside: avoid; margin: 8px 0 0; }
 .wz-toc-list { list-style: none; margin: 0; padding: 0; }
@@ -138,6 +143,7 @@ export const BOOK_FEATURES_CSS = `
 export const BOOK_FEATURES_EPUB_CSS = `
 .wz-ix-letter { font-weight: 800; margin-top: 10px; break-after: avoid; }
 .wz-ix-item { break-inside: avoid; margin: 2px 0; }
+.wz-ix-sub { padding-left: 14px; }
 .wz-index a { color: inherit; }
 .wz-gl-item { break-inside: avoid; margin: 8px 0 0; }
 .wz-toc-list { list-style: none; margin: 0; padding: 0; }

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Plus, Trash2, RotateCw, FileText, PanelTop, Layers, BookA } from 'lucide-react';
+import { X, Plus, Trash2, RotateCw, FileText, PanelTop, Layers, BookA, Copy } from 'lucide-react';
 import { useEditorStore } from '../../store/editorStore';
-import type { HeaderFooterZone, PageNumberStyle, PageSetup, ZoneSlot } from '../../types/ast';
+import type { HeaderFooterZone, PageMaster, PageNumberStyle, PageSetup, ZoneSlot } from '../../types/ast';
 import {
   HEADER_FOOTER_PRESETS,
   PAGE_SIZE_PRESETS,
@@ -20,7 +20,7 @@ interface PageSetupModalProps {
   onClose: () => void;
 }
 
-type Tab = 'page' | 'headerFooter' | 'sections' | 'terms';
+type Tab = 'page' | 'headerFooter' | 'masters' | 'sections' | 'terms';
 
 const labelCls = 'font-heading font-semibold block mb-1 text-neo-ink uppercase tracking-wider text-[11px]';
 const inputCls = 'w-full bg-white border-neo border-neo-ink px-2 py-1.5 rounded font-mono text-xs focus:outline-none';
@@ -303,6 +303,7 @@ export const PageSetupModal: React.FC<PageSetupModalProps> = ({ isOpen, onClose 
         <div className="px-4 pt-3 flex items-center gap-1.5 flex-wrap">
           {tabBtn('page', 'Page', <FileText className="w-3.5 h-3.5" />)}
           {tabBtn('headerFooter', 'Header & footer', <PanelTop className="w-3.5 h-3.5" />)}
+          {tabBtn('masters', 'Masters', <Copy className="w-3.5 h-3.5" />)}
           {tabBtn('sections', 'Sections', <Layers className="w-3.5 h-3.5" />)}
           {tabBtn('terms', 'Index & glossary', <BookA className="w-3.5 h-3.5" />)}
         </div>
@@ -506,6 +507,127 @@ export const PageSetupModal: React.FC<PageSetupModalProps> = ({ isOpen, onClose 
             </>
           )}
 
+          {tab === 'masters' && (
+            <>
+              <p className="text-[11px] font-mono text-gray-600 leading-snug">
+                A master page has its own header, footer and / or margins; anything you leave off follows the book's page setup. A master made for the
+                <strong> left</strong> or <strong>right</strong> side applies automatically to those pages when Facing pages is on (it replaces the
+                mirroring). Any master can also be picked for a section or a single page. Changes apply with “Apply to all pages”.
+              </p>
+              {(draft.masters || []).length === 0 && (
+                <div className="border border-dashed border-neo-ink/50 rounded-xl p-4 text-center text-[11px] font-mono text-gray-500">
+                  No master pages yet.
+                </div>
+              )}
+              {(draft.masters || []).map((m) => {
+                const patch = (p: Partial<PageMaster>) =>
+                  set({ masters: (draft.masters || []).map((x) => (x.id === m.id ? { ...x, ...p } : x)) });
+                const drop = (key: 'header' | 'footer' | 'margins') => {
+                  const next = { ...m };
+                  delete next[key];
+                  set({ masters: (draft.masters || []).map((x) => (x.id === m.id ? next : x)) });
+                };
+                return (
+                  <div key={m.id} className="border-neo border-neo-ink rounded-xl p-3 bg-white flex flex-col gap-2.5" data-master={m.name}>
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={m.name}
+                        onChange={(e) => patch({ name: e.target.value })}
+                        aria-label="Master name"
+                        className={`${inputCls} flex-1 font-bold`}
+                      />
+                      <select
+                        value={m.side || ''}
+                        onChange={(e) => {
+                          const side = (e.target.value || undefined) as PageMaster['side'];
+                          const next = { ...m };
+                          if (side) next.side = side;
+                          else delete next.side;
+                          set({ masters: (draft.masters || []).map((x) => (x.id === m.id ? next : x)) });
+                        }}
+                        aria-label="Master side"
+                        className="bg-white border border-neo-ink px-1.5 py-1.5 rounded text-xs font-mono"
+                      >
+                        <option value="">Pick manually</option>
+                        <option value="left">Left pages</option>
+                        <option value="right">Right pages</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => set({ masters: (draft.masters || []).filter((x) => x.id !== m.id) })}
+                        className="p-1.5 border-neo border-neo-ink rounded hover:bg-neo-vermilion hover:text-white"
+                        title="Delete master"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-neo-ink cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!m.header}
+                        onChange={(e) => (e.target.checked ? patch({ header: JSON.parse(JSON.stringify(draft.header)) }) : drop('header'))}
+                        className="w-4 h-4 accent-neo-ink"
+                      />
+                      Own header
+                    </label>
+                    {m.header && <ZoneEditor title={`${m.name} · header`} zone={m.header} onChange={(header) => patch({ header })} />}
+                    <label className="flex items-center gap-2 text-xs text-neo-ink cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!m.footer}
+                        onChange={(e) => (e.target.checked ? patch({ footer: JSON.parse(JSON.stringify(draft.footer)) }) : drop('footer'))}
+                        className="w-4 h-4 accent-neo-ink"
+                      />
+                      Own footer
+                    </label>
+                    {m.footer && <ZoneEditor title={`${m.name} · footer`} zone={m.footer} onChange={(footer) => patch({ footer })} />}
+                    <label className="flex items-center gap-2 text-xs text-neo-ink cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!m.margins}
+                        onChange={(e) => (e.target.checked ? patch({ margins: { ...draft.margins } }) : drop('margins'))}
+                        className="w-4 h-4 accent-neo-ink"
+                      />
+                      Own margins
+                    </label>
+                    {m.margins && (
+                      <div className="grid grid-cols-4 gap-2">
+                        {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
+                          <label key={side} className="flex flex-col font-mono text-[10px] text-gray-500 capitalize">
+                            {side}
+                            <input
+                              type="number"
+                              min={0}
+                              value={Math.round(m.margins![side])}
+                              onChange={(e) => patch({ margins: { ...m.margins!, [side]: Math.max(0, Number(e.target.value) || 0) } })}
+                              className="mt-0.5 bg-white border border-neo-ink px-1.5 py-1 rounded text-xs"
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              <div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    set({
+                      masters: [
+                        ...(draft.masters || []),
+                        { id: 'mst-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4), name: `Master ${(draft.masters || []).length + 1}` },
+                      ],
+                    })
+                  }
+                  className={`${btnCls} bg-neo-yellow shadow-neo-sm flex items-center gap-1.5`}
+                >
+                  <Plus className="w-3.5 h-3.5" strokeWidth={3} /> Add master page
+                </button>
+              </div>
+            </>
+          )}
+
           {tab === 'sections' && (
             <>
               <p className="text-[11px] font-mono text-gray-600 leading-snug">
@@ -581,6 +703,24 @@ export const PageSetupModal: React.FC<PageSetupModalProps> = ({ isOpen, onClose 
                         />
                         In contents
                       </label>
+                      {(project.pageSetup?.masters || []).length > 0 && (
+                        <label className="flex flex-col font-mono text-[10px] text-gray-500">
+                          Master page
+                          <select
+                            value={sec.masterId || ''}
+                            onChange={(e) => updateSection(sec.id, { masterId: e.target.value || undefined })}
+                            aria-label="Section master"
+                            className="mt-0.5 bg-white border border-neo-ink px-1.5 py-1 rounded text-xs"
+                          >
+                            <option value="">Automatic</option>
+                            {(project.pageSetup?.masters || []).map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                     </div>
                     <div className="flex items-center justify-between text-[10px] font-mono text-gray-500">
                       <span>{count} page{count === 1 ? '' : 's'}</span>
@@ -663,6 +803,55 @@ export const PageSetupModal: React.FC<PageSetupModalProps> = ({ isOpen, onClose 
                     rows={2}
                     className={`${inputCls} resize-y`}
                   />
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <label className="flex flex-col font-mono text-[10px] text-gray-500">
+                      Sub-entry of
+                      <select
+                        value={t.parent || ''}
+                        onChange={(e) => updateTerm(t.id, { parent: e.target.value || undefined })}
+                        aria-label="Sub-entry of"
+                        className="mt-0.5 bg-white border border-neo-ink px-1.5 py-1 rounded text-xs"
+                      >
+                        <option value="">Main entry</option>
+                        {(project.terms || [])
+                          .filter((o) => o.id !== t.id && !o.parent && o.term.trim() && !(project.terms || []).some((c) => c.parent === t.id))
+                          .map((o) => (
+                            <option key={o.id} value={o.id}>
+                              {o.term}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col font-mono text-[10px] text-gray-500">
+                      Also look for
+                      <input
+                        value={t.aliases || ''}
+                        onChange={(e) => updateTerm(t.id, { aliases: e.target.value || undefined })}
+                        placeholder="rhymes, rhyming"
+                        aria-label="Also look for"
+                        className="mt-0.5 bg-white border border-neo-ink px-1.5 py-1 rounded text-xs"
+                      />
+                    </label>
+                    <label className="flex flex-col font-mono text-[10px] text-gray-500">
+                      See also
+                      <input
+                        value={t.seeAlso || ''}
+                        onChange={(e) => updateTerm(t.id, { seeAlso: e.target.value || undefined })}
+                        placeholder="meter, verse"
+                        aria-label="See also"
+                        className="mt-0.5 bg-white border border-neo-ink px-1.5 py-1 rounded text-xs"
+                      />
+                    </label>
+                  </div>
+                  <label className="flex items-center gap-2 text-[10px] font-mono text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={t.auto !== false}
+                      onChange={(e) => updateTerm(t.id, { auto: e.target.checked ? undefined : false })}
+                      className="w-3.5 h-3.5 accent-neo-ink"
+                    />
+                    Find in the text automatically (turn off to list the term only on pages you tag)
+                  </label>
                 </div>
               ))}
               <div>
