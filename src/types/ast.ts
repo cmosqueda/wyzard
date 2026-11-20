@@ -113,6 +113,12 @@ export interface Chapter {
   hideFooter?: boolean;
   /** Full-bleed page: no margins, header or footer (covers, openers) */
   fullBleed?: boolean;
+  /** What this page is (drives EPUB landmarks and the "Book pages" menu) */
+  kind?: PageKind;
+  /** Lists this page in the table of contents */
+  tocEntry?: { title?: string; level: 1 | 2 | 3 };
+  /** Starts a new run of page numbers at this page (e.g. roman front matter, then arabic from 1) */
+  numbering?: PageNumbering;
   createdAt: number;
   updatedAt: number;
 }
@@ -134,11 +140,23 @@ export interface BookMetadata {
   title: string;
   /** Short running title for headers / footers, e.g. "ENGLISH 7" */
   shortTitle?: string;
+  subtitle?: string;
+  // ---- imprint / copyright page ----
+  publisher?: string;
+  isbn?: string;
+  edition?: string;
+  copyrightYear?: string;
+  copyrightHolder?: string;
+  classification?: string;
+  /** Address, phone, e-mail, website */
+  contact?: string;
+  /** Boxed legal notice, e.g. "No portion of this book may be reproduced …" */
+  rightsStatement?: string;
+  disclaimer?: string;
   author: string;
   identifier?: string;
   language: string; // default 'en'
   description?: string;
-  publisher?: string;
   coverImage?: string; // base64 or blob URL
   attributions?: AssetAttribution[];
 }
@@ -151,6 +169,8 @@ export interface BookMetadata {
 export type CanvasDesignSystem = 'plain' | 'wyzard';
 
 export type LayoutMode = 'reflowable' | 'fixed';
+
+export type PageKind = 'cover' | 'title' | 'copyright' | 'dedication' | 'preface' | 'toc' | 'backCover' | 'content';
 
 export interface ZoneSlot {
   /** Text with tokens such as {sectionTitle} or {pageNumber}. Extra lines render smaller. */
@@ -204,6 +224,12 @@ export interface BookSection {
   /** Free text shown by {sectionNumber}, e.g. "1" or "I" */
   number?: string;
   color?: string;
+  /** Depth in the table of contents: 1 = part / unit, 2 = chapter, 3 = lesson */
+  level?: 1 | 2 | 3;
+  /** Short label shown before the title in the table of contents, e.g. "Chapter 1" */
+  tocLabel?: string;
+  /** Set false to keep this section out of the table of contents */
+  inToc?: boolean;
 }
 
 export interface BookProject {

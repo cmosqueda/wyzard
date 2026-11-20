@@ -44,7 +44,12 @@ Choose **Fixed-layout book** when creating a project to design like a traditiona
 - **Margins and guides:** per-side margins, margin guides on the page, and a warning when content overflows the page.
 - **Running headers and footers:** a three-slot designer with tokens such as `{sectionTitle}`, `{sectionNumber}`, `{shortTitle}` and `{pageNumber}`, section colours, presets (textbook band, classic running head, page number only), and per-page hide / **full-bleed** pages for covers and openers.
 - **Page numbering:** choose the first number and the style (1, i, I, none).
-- **Exports from your pages:** HTML, PDF and CBZ keep each page exactly as laid out. EPUB currently exports pages as reflowable chapters; fixed-layout EPUB, an auto table of contents with clickable entries, and book-feature pages (cover, copyright, preface, …) are planned next.
+- **Book pages:** one menu inserts a front cover, title page, copyright page, dedication, preface, table of contents and back cover in the right order. The title, copyright and contents pages fill themselves from your book details (title, author, publisher, ISBN, edition, rights statement, disclaimer).
+- **Automatic table of contents:** built from your sections and from pages you mark "Include in table of contents", with levels (part, chapter, lesson), dot leaders, chapter labels and real printed page numbers. Every entry is a link to its page in the HTML reader, the HTML pack, the PDF and the EPUB.
+- **Page-number runs:** restart numbering anywhere (roman front matter, then arabic from 1).
+- **Exports from your pages:** HTML, PDF and CBZ keep each page exactly as laid out. EPUB gets a cover image (uploaded, or rendered from your cover page), a nested navigation document, landmarks and a page list, with each page as a reflowable chapter for now. Fixed-layout EPUB, print PDF with bleed and crop marks, facing-page masters and an index are planned.
+
+Design notes and the full plan live in [`docs/specs/fixed-layout-books.md`](docs/specs/fixed-layout-books.md).
 
 ### Notion-style tables and LaTeX math
 - **Table block:** click to type, `Tab` / `Enter` to move between cells, paste straight from a spreadsheet, drag column borders, insert / move / delete rows and columns, header row and column, striped rows and per-column alignment.

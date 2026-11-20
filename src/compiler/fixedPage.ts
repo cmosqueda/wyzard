@@ -1,5 +1,7 @@
 import type { BookProject, HeaderFooterZone, ZoneSlot } from '../types/ast';
 import type { ParsedBlockNode } from './astParser';
+import { withExportContext } from './exportContext';
+import { BOOK_FEATURES_CSS } from './bookFeaturesHtml';
 import {
   getPageContext,
   getPageRegions,
@@ -70,9 +72,17 @@ export function renderFixedPageHtml(
   const page = project.chapters[pageIndex];
   const regions = getPageRegions(setup, page);
   const ctx = getPageContext(project, pageIndex);
-  const body = nodes.map((n) => `<div class="fx-block">${renderNode(n)}</div>`).join('\n');
+  // Smart blocks (table of contents …) read the whole book through the export context
+  const body = withExportContext({ project }, () =>
+    nodes
+      .map((n) => {
+        const grow = n.type === 'TitlePageBlock' && (n.props?.variant === 'cover' || n.props?.variant === 'back');
+        return `<div class="fx-block${grow ? ' fx-grow' : ''}">${renderNode(n)}</div>`;
+      })
+      .join('\n')
+  );
 
-  return `<section class="wyzard-page-grab fx-page" data-page="${pageIndex + 1}" style="position:relative;display:block;padding:0;width:${setup.width}px;height:${
+  return `<section id="page-${pageIndex + 1}" class="wyzard-page-grab fx-page" data-page="${pageIndex + 1}" style="position:relative;display:block;padding:0;width:${setup.width}px;height:${
     setup.height
   }px;background:${page.backgroundColor || '#FFFFFF'};overflow:hidden">
     ${regions.header ? `<div class="fx-zone" style="${boxStyle(regions.header)}z-index:3">${zoneHtml(regions.header.zone, ctx)}</div>` : ''}
@@ -82,8 +92,10 @@ export function renderFixedPageHtml(
 }
 
 /** Styles shared by every export that renders fixed pages. */
-export const FIXED_PAGE_CSS = `
+export const FIXED_PAGE_CSS = BOOK_FEATURES_CSS + `
 .fx-page { box-sizing: border-box; }
+.fx-body > .fx-grow { flex: 1 1 auto; min-height: 0; }
+.fx-body > .fx-grow > .wz-titlepage { height: 100%; }
 .fx-body > .fx-block { flex: 0 0 auto; min-width: 0; }
 .fx-body > .fx-block > * { margin-top: 0; }
 .fx-body p, .fx-body h1, .fx-body h2, .fx-body h3 { margin-bottom: 0.6em; }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useEditorStore } from '../../../store/editorStore';
 import { Award, Trash2, Plus, ExternalLink } from 'lucide-react';
+import { saveAsset } from '../../../db/assets';
 
 export const ProjectInspector: React.FC = () => {
   const {
@@ -11,6 +12,18 @@ export const ProjectInspector: React.FC = () => {
     setDesignSystem,
   } = useEditorStore();
   const designSystem = project.designSystem === 'plain' ? 'plain' : 'wyzard';
+
+  const coverFileRef = React.useRef<HTMLInputElement>(null);
+  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      updateProjectMetadata({ coverImage: await saveAsset(project.id, file) });
+    } catch {
+      // saveAsset already reports the problem
+    }
+    e.target.value = '';
+  };
 
   const [newTitle, setNewTitle] = useState('');
   const [newCreator, setNewCreator] = useState('');
@@ -79,6 +92,41 @@ export const ProjectInspector: React.FC = () => {
           onChange={(e) => updateProjectMetadata({ title: e.target.value })}
           className="w-full bg-white border-neo border-neo-ink px-2.5 py-1.5 rounded font-mono text-xs focus:outline-none focus:ring-1 focus:ring-neo-ink shadow-neo-sm"
         />
+      </div>
+
+      <div>
+        <label className="font-heading font-semibold block mb-1 text-neo-ink uppercase tracking-wider text-[11px]">
+          Subtitle
+        </label>
+        <input
+          type="text"
+          value={project.metadata.subtitle || ''}
+          onChange={(e) => updateProjectMetadata({ subtitle: e.target.value })}
+          className="w-full bg-white border-neo border-neo-ink px-2.5 py-1.5 rounded font-mono text-xs focus:outline-none focus:ring-1 focus:ring-neo-ink shadow-neo-sm"
+        />
+      </div>
+
+      <div>
+        <label className="font-heading font-semibold block mb-1 text-neo-ink uppercase tracking-wider text-[11px]">
+          Cover Image (EPUB cover &amp; store thumbnail)
+        </label>
+        <div className="flex gap-2">
+          <input ref={coverFileRef} type="file" accept="image/*" onChange={handleCoverUpload} className="hidden" />
+          <button
+            type="button"
+            onClick={() => coverFileRef.current?.click()}
+            className="px-2.5 py-1.5 bg-neo-yellow text-neo-ink border-neo border-neo-ink rounded font-mono text-xs font-bold shadow-neo-sm"
+          >
+            Upload
+          </button>
+          <input
+            type="text"
+            value={project.metadata.coverImage || ''}
+            placeholder={project.layoutMode === 'fixed' ? 'Empty = rendered from your cover page' : 'https://…'}
+            onChange={(e) => updateProjectMetadata({ coverImage: e.target.value })}
+            className="flex-1 min-w-0 bg-white border-neo border-neo-ink px-2 py-1.5 rounded font-mono text-xs focus:outline-none shadow-neo-sm"
+          />
+        </div>
       </div>
 
       <div>

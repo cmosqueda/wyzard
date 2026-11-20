@@ -187,6 +187,77 @@ export function formatPageNumber(index: number, numbering: PageNumbering | undef
   }
 }
 
+/**
+ * The number printed on page `index`. A page with its own `numbering` starts a new run
+ * (roman front matter, then arabic from 1, …); otherwise the book-wide numbering applies.
+ */
+export function getPrintedNumber(project: BookProject, index: number): string {
+  const base = project.pageSetup?.numbering;
+  let start = base?.start ?? 1;
+  let style: PageNumbering['style'] = base?.style ?? 'arabic';
+  let runStart = 0;
+  for (let i = 0; i <= index && i < project.chapters.length; i++) {
+    const o = project.chapters[i].numbering;
+    if (o) {
+      start = o.start;
+      style = o.style;
+      runStart = i;
+    }
+  }
+  return formatPageNumber(index - runStart, { start, style });
+}
+
+export interface TocEntry {
+  id: string;
+  /** Short label before the title, e.g. "Chapter 1" */
+  label: string;
+  title: string;
+  level: 1 | 2 | 3;
+  pageIndex: number;
+  pageId: string;
+  /** Page number as printed (respects numbering runs) */
+  printed: string;
+}
+
+/**
+ * Table of contents derived from the book's structure: every section (at the first page that uses it)
+ * and every page marked "include in table of contents". Order follows the pages.
+ */
+export function buildTocEntries(project: BookProject): TocEntry[] {
+  const out: TocEntry[] = [];
+  const seen = new Set<string>();
+  project.chapters.forEach((page, i) => {
+    const printed = getPrintedNumber(project, i);
+    if (page.sectionId && !seen.has(page.sectionId)) {
+      seen.add(page.sectionId);
+      const sec = project.sections?.find((x) => x.id === page.sectionId);
+      if (sec && sec.inToc !== false) {
+        out.push({
+          id: `toc-sec-${sec.id}`,
+          label: sec.tocLabel ?? '',
+          title: sec.title,
+          level: sec.level ?? 1,
+          pageIndex: i,
+          pageId: page.id,
+          printed,
+        });
+      }
+    }
+    if (page.tocEntry) {
+      out.push({
+        id: `toc-page-${page.id}`,
+        label: '',
+        title: page.tocEntry.title?.trim() || page.title,
+        level: page.tocEntry.level,
+        pageIndex: i,
+        pageId: page.id,
+        printed,
+      });
+    }
+  });
+  return out;
+}
+
 export function findSection(project: BookProject, page: Chapter): BookSection | undefined {
   return page.sectionId ? project.sections?.find((s) => s.id === page.sectionId) : undefined;
 }
@@ -214,7 +285,7 @@ export function getPageContext(project: BookProject, pageIndex: number): PageCon
     bookTitle: title,
     shortTitle: project.metadata.shortTitle || title,
     author: project.metadata.author || '',
-    pageNumber: formatPageNumber(pageIndex, project.pageSetup?.numbering),
+    pageNumber: getPrintedNumber(project, pageIndex),
     pageCount: String(project.chapters.length),
     pageTitle: page?.title || '',
     sectionNumber: section?.number || '',

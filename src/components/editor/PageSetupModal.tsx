@@ -508,6 +508,38 @@ export const PageSetupModal: React.FC<PageSetupModalProps> = ({ isOpen, onClose 
                       </label>
                       <ColorField label="Colour" value={sec.color || draft.accentColor || '#2563EB'} onChange={(v) => updateSection(sec.id, { color: v })} />
                     </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px_auto] gap-2 items-end">
+                      <label className="flex flex-col font-mono text-[10px] text-gray-500">
+                        Contents label (e.g. “Chapter 1”)
+                        <input
+                          value={sec.tocLabel || ''}
+                          onChange={(e) => updateSection(sec.id, { tocLabel: e.target.value })}
+                          className="mt-0.5 bg-white border border-neo-ink px-1.5 py-1 rounded text-xs"
+                          placeholder="optional"
+                        />
+                      </label>
+                      <label className="flex flex-col font-mono text-[10px] text-gray-500">
+                        Contents level
+                        <select
+                          value={sec.level ?? 1}
+                          onChange={(e) => updateSection(sec.id, { level: Number(e.target.value) as 1 | 2 | 3 })}
+                          className="mt-0.5 bg-white border border-neo-ink px-1.5 py-1 rounded text-xs"
+                        >
+                          <option value={1}>1 · Part / unit</option>
+                          <option value={2}>2 · Chapter</option>
+                          <option value={3}>3 · Lesson</option>
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-1.5 font-mono text-[10px] text-neo-ink pb-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={sec.inToc !== false}
+                          onChange={(e) => updateSection(sec.id, { inToc: e.target.checked })}
+                          className="accent-neo-ink"
+                        />
+                        In contents
+                      </label>
+                    </div>
                     <div className="flex items-center justify-between text-[10px] font-mono text-gray-500">
                       <span>{count} page{count === 1 ? '' : 's'}</span>
                       <div className="flex items-center gap-2">

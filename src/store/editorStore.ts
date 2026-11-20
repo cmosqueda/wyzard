@@ -9,6 +9,7 @@ import type {
   CanvasDesignSystem,
   PageSetup,
   BookSection,
+  PageKind,
 } from '../types/ast';
 import { VIEWPORT_PRESETS } from '../types/ast';
 import {
@@ -23,6 +24,7 @@ import {
 import { syncProjectToLocalFs, deleteProjectFromLocalFs } from '../db/localFs';
 import { rehydrateProjectAssets } from '../db/assets';
 import { viewportForPageWidth } from '../utils/pageLayout';
+import { BOOK_PAGE_KITS, FRONT_MATTER_ORDER, createBookPage } from '../db/bookPages';
 
 /** In fixed-layout books the responsive blocks follow the PAGE width, not the preview device. */
 function fixedViewportFor(project: BookProject): ViewportMode | null {
@@ -159,8 +161,11 @@ interface EditorState {
   duplicateChapter: (chapterId: string) => void;
   updateChapterMeta: (
     chapterId: string,
-    patch: Partial<Pick<Chapter, 'title' | 'sectionId' | 'hideHeader' | 'hideFooter' | 'fullBleed'>>
+    patch: Partial<
+      Pick<Chapter, 'title' | 'sectionId' | 'hideHeader' | 'hideFooter' | 'fullBleed' | 'kind' | 'tocEntry' | 'numbering'>
+    >
   ) => void;
+  addBookPage: (kind: Exclude<PageKind, 'content'>) => void;
   updatePageSetup: (patch: Partial<PageSetup>) => void;
   addSection: (section?: Partial<BookSection>) => string;
   updateSection: (id: string, patch: Partial<BookSection>) => void;
@@ -717,6 +722,40 @@ export const useEditorStore = create<EditorState>()(
         state.project.updatedAt = Date.now();
       });
       get().saveProjectToDb();
+    },
+
+    addBookPage: (kind) => {
+      const { project } = get();
+      const kit = BOOK_PAGE_KITS.find((k) => k.kind === kind);
+      const existing = kit?.unique ? project.chapters.find((c) => c.kind === kind) : undefined;
+      if (existing) {
+        get().setActiveChapter(existing.id);
+        notify({ type: 'info', title: `${kit?.label} already exists`, message: 'Opened the existing page.', duration: 2200 });
+        return;
+      }
+      get().pushHistorySnapshot();
+      const page = createBookPage(kind, project);
+      set((state) => {
+        const list = state.project.chapters;
+        let index: number;
+        if (kind === 'cover') index = 0;
+        else if (kind === 'backCover') index = list.length;
+        else {
+          const rank = FRONT_MATTER_ORDER.indexOf(kind);
+          let last = -1;
+          list.forEach((c, i) => {
+            const r = c.kind ? FRONT_MATTER_ORDER.indexOf(c.kind) : -1;
+            if (r !== -1 && r <= rank) last = i;
+          });
+          index = last + 1;
+        }
+        list.splice(index, 0, page);
+        list.forEach((c, i) => (c.order = i + 1));
+        state.project.activeChapterId = page.id;
+        state.project.updatedAt = Date.now();
+      });
+      get().saveProjectToDb();
+      notify({ type: 'success', title: `${kit?.label} added`, duration: 1800 });
     },
 
     updatePageSetup: (patch) => {

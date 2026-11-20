@@ -10,9 +10,14 @@ import {
   Maximize,
   PanelTop,
   PanelBottom,
+  BookOpen,
+  ListOrdered,
+  Hash,
 } from 'lucide-react';
 import { useEditorStore } from '../../../store/editorStore';
-import { DEFAULT_ACCENT, formatPageNumber } from '../../../utils/pageLayout';
+import { DEFAULT_ACCENT, getPrintedNumber } from '../../../utils/pageLayout';
+import { PopoverMenu } from '../../ui/PopoverMenu';
+import { BOOK_PAGE_KITS } from '../../../db/bookPages';
 
 /**
  * Page list for fixed-layout books: every page is one fixed-size canvas. Pages are grouped under their
@@ -27,13 +32,13 @@ export const PageRail: React.FC<{ onOpenPageSetup: () => void }> = ({ onOpenPage
   const reorderChapters = useEditorStore((s) => s.reorderChapters);
   const renameChapter = useEditorStore((s) => s.renameChapter);
   const updateChapterMeta = useEditorStore((s) => s.updateChapterMeta);
+  const addBookPage = useEditorStore((s) => s.addBookPage);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
 
   const pages = project.chapters;
   const sections = project.sections || [];
-  const numbering = project.pageSetup?.numbering;
   const active = pages.find((p) => p.id === project.activeChapterId) || pages[0];
   const activeIndex = pages.findIndex((p) => p.id === active?.id);
 
@@ -63,6 +68,38 @@ export const PageRail: React.FC<{ onOpenPageSetup: () => void }> = ({ onOpenPage
           >
             <SlidersHorizontal className="w-4 h-4" strokeWidth={2.5} />
           </button>
+          <PopoverMenu
+            title="Add a cover, title page, copyright page, preface, table of contents …"
+            align="right"
+            icon={<BookOpen className="w-4 h-4" strokeWidth={2.5} />}
+            buttonClassName="!px-1.5 !py-1.5 rounded border-neo border-neo-ink bg-white hover:bg-neo-bg shadow-neo-sm"
+          >
+            {(close) => (
+              <div className="flex flex-col min-w-[230px] text-neo-ink">
+                <div className="px-2 pt-1 pb-1 text-[9px] font-mono font-bold uppercase tracking-wider text-gray-500">Book pages</div>
+                {BOOK_PAGE_KITS.map((kit) => {
+                  const exists = kit.unique && pages.some((p) => p.kind === kit.kind);
+                  return (
+                    <button
+                      key={kit.kind}
+                      type="button"
+                      onClick={() => {
+                        addBookPage(kit.kind);
+                        close();
+                      }}
+                      className="flex flex-col items-start px-2.5 py-1.5 rounded text-left hover:bg-neo-yellow/50"
+                    >
+                      <span className="font-mono text-xs font-bold">
+                        {kit.label}
+                        {exists && <span className="ml-1.5 text-[9px] font-normal text-gray-500">(added)</span>}
+                      </span>
+                      <span className="font-mono text-[10px] text-gray-500">{kit.description}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </PopoverMenu>
           <button
             onClick={() => addChapter()}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded border-neo border-neo-ink bg-neo-yellow font-mono text-xs font-bold shadow-neo-sm hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all"
@@ -79,7 +116,7 @@ export const PageRail: React.FC<{ onOpenPageSetup: () => void }> = ({ onOpenPage
           const showHeading = (sec?.id || '') !== (prevSec?.id || '') || i === 0;
           const isActive = pg.id === active?.id;
           const accent = sec?.color || project.pageSetup?.accentColor || DEFAULT_ACCENT;
-          const printed = formatPageNumber(i, numbering);
+          const printed = getPrintedNumber(project, i);
           return (
             <React.Fragment key={pg.id}>
               {showHeading && (sec || i > 0) && (
@@ -128,6 +165,9 @@ export const PageRail: React.FC<{ onOpenPageSetup: () => void }> = ({ onOpenPage
                     </div>
                   )}
                   <div className="flex items-center gap-1 text-[9px] font-mono text-gray-500">
+                    {pg.kind && pg.kind !== 'content' && <span className="px-1 rounded bg-neo-teal text-neo-ink font-bold">{pg.kind === 'backCover' ? 'BACK' : pg.kind.toUpperCase()}</span>}
+                    {pg.tocEntry && <span title="Listed in the table of contents">TOC</span>}
+                    {pg.numbering && <span title="Page numbering restarts here">#{pg.numbering.start}</span>}
                     {pg.fullBleed && <span className="px-1 rounded bg-neo-ink text-white">BLEED</span>}
                     {pg.hideHeader && !pg.fullBleed && <span>no header</span>}
                     {pg.hideFooter && !pg.fullBleed && <span>no footer</span>}
@@ -216,6 +256,74 @@ export const PageRail: React.FC<{ onOpenPageSetup: () => void }> = ({ onOpenPage
               />
               <PanelBottom className="w-3 h-3" /> Hide footer on this page
             </label>
+          </div>
+          <div className="border-t border-neo-ink/20 pt-2 mt-1 flex flex-col gap-1.5">
+            <label className="flex items-center gap-2 text-neo-ink cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!active.tocEntry}
+                onChange={(e) => updateChapterMeta(active.id, { tocEntry: e.target.checked ? { level: 1 } : undefined })}
+                className="accent-neo-ink"
+              />
+              <ListOrdered className="w-3 h-3" /> Include in table of contents
+            </label>
+            {active.tocEntry && (
+              <div className="grid grid-cols-[1fr_auto] gap-1.5 pl-5">
+                <input
+                  value={active.tocEntry.title || ''}
+                  placeholder={active.title}
+                  onChange={(e) => updateChapterMeta(active.id, { tocEntry: { ...active.tocEntry!, title: e.target.value || undefined } })}
+                  className="bg-white border border-neo-ink px-1.5 py-1 rounded text-[11px] text-neo-ink min-w-0"
+                  title="Entry text (defaults to the page title)"
+                />
+                <select
+                  value={active.tocEntry.level}
+                  onChange={(e) => updateChapterMeta(active.id, { tocEntry: { ...active.tocEntry!, level: Number(e.target.value) as 1 | 2 | 3 } })}
+                  className="bg-white border border-neo-ink px-1 py-1 rounded text-[11px] text-neo-ink"
+                >
+                  <option value={1}>Level 1</option>
+                  <option value={2}>Level 2</option>
+                  <option value={3}>Level 3</option>
+                </select>
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-neo-ink cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!active.numbering}
+                onChange={(e) =>
+                  updateChapterMeta(active.id, { numbering: e.target.checked ? { start: 1, style: 'arabic' } : undefined })
+                }
+                className="accent-neo-ink"
+              />
+              <Hash className="w-3 h-3" /> Restart page numbers here
+            </label>
+            {active.numbering && (
+              <div className="grid grid-cols-2 gap-1.5 pl-5">
+                <input
+                  type="number"
+                  value={active.numbering.start}
+                  onChange={(e) => updateChapterMeta(active.id, { numbering: { ...active.numbering!, start: Number(e.target.value) || 1 } })}
+                  className="bg-white border border-neo-ink px-1.5 py-1 rounded text-[11px] text-neo-ink"
+                  title="Number printed on this page"
+                />
+                <select
+                  value={active.numbering.style}
+                  onChange={(e) =>
+                    updateChapterMeta(active.id, { numbering: { ...active.numbering!, style: e.target.value as 'arabic' | 'roman' | 'roman-upper' | 'none' } })
+                  }
+                  className="bg-white border border-neo-ink px-1 py-1 rounded text-[11px] text-neo-ink"
+                >
+                  <option value="arabic">1, 2, 3</option>
+                  <option value="roman">i, ii, iii</option>
+                  <option value="roman-upper">I, II, III</option>
+                  <option value="none">None</option>
+                </select>
+              </div>
+            )}
+            <span className="text-[9px] text-gray-500">
+              Prints as “{getPrintedNumber(project, activeIndex) || '—'}” on page {activeIndex + 1}.
+            </span>
           </div>
           <span className="sr-only">
             <Check />

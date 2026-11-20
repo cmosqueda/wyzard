@@ -3,6 +3,8 @@ import { parseCraftState, type ParsedBlockNode } from './astParser';
 import { googleFontsHref, googleFontStack } from '../utils/googleFonts';
 import { getArtboardHeightRatio, getArtboardWidthPct } from '../utils/artboard';
 import { renderFixedPageHtml, FIXED_PAGE_CSS } from './fixedPage';
+import { getExportContext, withExportContext } from './exportContext';
+import { titlePageHtml, copyrightHtml, tocHtml } from './bookFeaturesHtml';
 import { KATEX_CSS_HREF, hasMath, htmlHasMath, renderMathInHtml, renderMathInText } from '../utils/math';
 
 const MATH_CSS_LINK = `<link rel="stylesheet" href="${KATEX_CSS_HREF}">`;
@@ -261,6 +263,21 @@ export function renderWebNode(node: ParsedBlockNode): string {
           </div>
         </section>
       `;
+    }
+
+    case 'TitlePageBlock': {
+      const ctx = getExportContext();
+      return ctx.project ? titlePageHtml(ctx.project, p, 'web') : '';
+    }
+
+    case 'CopyrightBlock': {
+      const ctx = getExportContext();
+      return ctx.project ? copyrightHtml(ctx.project, p) : '';
+    }
+
+    case 'TocBlock': {
+      const ctx = getExportContext();
+      return ctx.project ? tocHtml(ctx.project, p, ctx.hrefFor) : '';
     }
 
     case 'TableBlock':
@@ -918,6 +935,7 @@ function compileFixedWebPage(project: BookProject, currentChapterId?: string): s
   const nodes = page.craftStateJson ? parseCraftState(page.craftStateJson) : [];
   const pageHtml = renderFixedPageHtml(project, pageIndex, nodes, renderWebNode);
   const setup = project.pageSetup!;
+  // inside the in-app Reader the page is an iframe: tell the Reader which page a contents link points to
 
   return `<!DOCTYPE html>
 <html lang="${project.metadata.language || 'en'}">
@@ -952,6 +970,13 @@ function compileFixedWebPage(project: BookProject, currentChapterId?: string): s
         el.style.marginBottom = (H * s - H) + 'px';
       }
       fit(); window.addEventListener('resize', fit);
+      document.addEventListener('click', function (e) {
+        var a = e.target.closest && e.target.closest('a[data-wz-page]');
+        if (a && window.parent !== window) {
+          e.preventDefault();
+          window.parent.postMessage({ wyzardGoto: a.getAttribute('data-wz-page') }, '*');
+        }
+      });
     })();
     ${getWebRuntimeJs()}
   </script>

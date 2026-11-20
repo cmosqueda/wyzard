@@ -4,6 +4,10 @@ import type { BookProject, Chapter, CanvasDesignSystem } from '../types/ast';
 import { parseCraftState, type ParsedBlockNode } from './astParser';
 import { getArtboardHeightRatio } from '../utils/artboard';
 import { extractMath, renderMathInText, unescapeHtml } from '../utils/math';
+import { getExportContext, withExportContext } from './exportContext';
+import { titlePageHtml, copyrightHtml, tocHtml, BOOK_FEATURES_EPUB_CSS } from './bookFeaturesHtml';
+import { buildTocEntries, getPrintedNumber } from '../utils/pageLayout';
+import { paginateProjectForViewport, renderPageGrabToCanvasDataUrl } from './multiFormatExporter';
 
 /**
  * Escapes characters for strict XML / XHTML compliance.
@@ -257,6 +261,21 @@ function renderEpubNode(node: ParsedBlockNode): string {
       `;
     }
 
+    case 'TitlePageBlock': {
+      const ctx = getExportContext();
+      return ctx.project ? titlePageHtml(ctx.project, p, 'epub') : '';
+    }
+
+    case 'CopyrightBlock': {
+      const ctx = getExportContext();
+      return ctx.project ? copyrightHtml(ctx.project, p) : '';
+    }
+
+    case 'TocBlock': {
+      const ctx = getExportContext();
+      return ctx.project ? tocHtml(ctx.project, p, ctx.hrefFor) : '';
+    }
+
     case 'TableBlock':
     case 'Table': {
       const grid: string[][] = (Array.isArray(p.rows) && p.rows.length ? p.rows : [['']]).map((r: any) =>
@@ -390,9 +409,37 @@ function renderEpubNode(node: ParsedBlockNode): string {
 /**
  * Builds the strict XHTML document for a single chapter.
  */
-function buildChapterXhtml(chapter: Chapter, project: BookProject): string {
-  const parsedNodes = parseCraftState(chapter.craftStateJson);
-  const bodyContent = parsedNodes.map(renderEpubNode).join('\n');
+const KIND_EPUB_TYPE: Record<string, { type: string; role?: string }> = {
+  cover: { type: 'cover' },
+  title: { type: 'titlepage' },
+  copyright: { type: 'copyright-page' },
+  dedication: { type: 'dedication', role: 'doc-dedication' },
+  preface: { type: 'preface', role: 'doc-preface' },
+  toc: { type: 'frontmatter' },
+  backCover: { type: 'backmatter' },
+};
+
+function buildChapterXhtml(
+  chapter: Chapter,
+  project: BookProject,
+  pageIndex: number,
+  coverFile?: string
+): string {
+  const isFixed = project.layoutMode === 'fixed';
+  const parsedNodes = chapter.craftStateJson ? parseCraftState(chapter.craftStateJson) : [];
+  const bodyContent =
+    isFixed && chapter.kind === 'cover' && coverFile
+      ? `<div class="epub-cover"><img src="../images/${coverFile}" alt="Cover"/></div>`
+      : withExportContext({ project, hrefFor: (i) => `chapter-${i + 1}.xhtml` }, () =>
+          parsedNodes.map(renderEpubNode).join('\n')
+        );
+  const kind = chapter.kind ? KIND_EPUB_TYPE[chapter.kind] : undefined;
+  const sectionAttrs = kind
+    ? `epub:type="${kind.type}"${kind.role ? ` role="${kind.role}"` : ''}`
+    : isFixed
+    ? 'epub:type="bodymatter chapter" role="doc-chapter"'
+    : 'epub:type="chapter" role="doc-chapter"';
+  void pageIndex;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
@@ -403,12 +450,78 @@ function buildChapterXhtml(chapter: Chapter, project: BookProject): string {
   <link rel="stylesheet" type="text/css" href="../css/style.css" />
 </head>
 <body class="epub-body-doc">
-  <section epub:type="chapter" role="doc-chapter">
-    <h1 class="chapter-heading">${escapeXml(chapter.title)}</h1>
+  <section id="page-${pageIndex + 1}" ${sectionAttrs}>
+    ${isFixed ? '' : `<h1 class="chapter-heading">${escapeXml(chapter.title)}</h1>`}
     ${bodyContent}
   </section>
 </body>
 </html>`;
+}
+
+interface NavNode {
+  title: string;
+  href: string;
+  children: NavNode[];
+}
+
+/** Nested <ol> for the EPUB navigation document, following the entries' levels. */
+function renderNavTree(entries: { level: number; title: string; href: string }[]): string {
+  const root: NavNode = { title: '', href: '', children: [] };
+  const stack: [NavNode, number][] = [[root, 0]];
+  entries.forEach((e) => {
+    while (stack.length > 1 && stack[stack.length - 1][1] >= e.level) stack.pop();
+    const node: NavNode = { title: e.title, href: e.href, children: [] };
+    stack[stack.length - 1][0].children.push(node);
+    stack.push([node, e.level]);
+  });
+  const render = (n: NavNode): string =>
+    `<ol>${n.children
+      .map((c) => `<li><a href="${escapeXml(c.href)}">${escapeXml(c.title)}</a>${c.children.length ? render(c) : ''}</li>`)
+      .join('')}</ol>`;
+  return render(root);
+}
+
+function dataUrlToBytes(dataUrl: string): Uint8Array {
+  const bin = atob(dataUrl.split(',')[1] || '');
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+interface CoverAsset {
+  file: string;
+  mime: string;
+  data: Uint8Array | Blob;
+}
+
+/** The book's cover: the uploaded image, or (fixed books) a render of the cover page. */
+async function resolveCover(project: BookProject): Promise<CoverAsset | null> {
+  if (project.metadata.coverImage) {
+    try {
+      const res = await fetch(project.metadata.coverImage);
+      const blob = await res.blob();
+      const ext = blob.type.includes('png') ? 'png' : blob.type.includes('webp') ? 'webp' : blob.type.includes('svg') ? 'svg' : 'jpg';
+      const mime = blob.type || (ext === 'jpg' ? 'image/jpeg' : `image/${ext}`);
+      if (mime.startsWith('image/')) return { file: `cover.${ext}`, mime, data: blob };
+    } catch {
+      // unreachable cover image: fall through to the cover page render
+    }
+  }
+  if (project.layoutMode === 'fixed' && project.pageSetup) {
+    const coverPage = project.chapters.find((c) => c.kind === 'cover');
+    if (coverPage) {
+      try {
+        const pages = paginateProjectForViewport(project, 'tablet', coverPage.id);
+        if (pages[0]) {
+          const url = await renderPageGrabToCanvasDataUrl(pages[0], project, project.chapters.length, 2);
+          if (url) return { file: 'cover.png', mime: 'image/png', data: dataUrlToBytes(url) };
+        }
+      } catch (err) {
+        console.warn('Could not render the cover page for the EPUB cover:', err);
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -584,7 +697,8 @@ body { color: #111; }
 .epub-audio-card { border: 1px solid #ccc; background: #fff; }
 .epub-footnotes { border-top: 1px solid #ccc; }
 `;
-  return designSystem === 'plain' ? base + plainOverrides : base;
+  const cover = '\n.epub-cover { text-align: center; margin: 0; }\n.epub-cover img { max-width: 100%; height: auto; display: block; margin: 0 auto; }\n';
+  return (designSystem === 'plain' ? base + plainOverrides : base) + cover + BOOK_FEATURES_EPUB_CSS;
 }
 
 /**
@@ -608,11 +722,16 @@ export async function exportToEpub(project: BookProject): Promise<void> {
   // 3. OEBPS/css/style.css
   zip.file('OEBPS/css/style.css', getEpubStyles(project.designSystem));
 
+  // 3b. Cover image (uploaded, or rendered from the cover page of a fixed-layout book)
+  const cover = await resolveCover(project);
+  if (cover) zip.file(`OEBPS/images/${cover.file}`, cover.data);
+  const hasCoverPage = project.chapters.some((c) => c.kind === 'cover');
+
   // 4. Chapter XHTML documents
   const chapterEntries: { id: string; filename: string; title: string; hasMath?: boolean }[] = [];
   project.chapters.forEach((chapter, idx) => {
     const filename = `chapter-${idx + 1}.xhtml`;
-    const chapterXml = buildChapterXhtml(chapter, project);
+    const chapterXml = buildChapterXhtml(chapter, project, idx, cover?.file);
     zip.file(`OEBPS/chapters/${filename}`, chapterXml);
     chapterEntries.push({
       id: `chapter-${idx + 1}`,
@@ -621,6 +740,26 @@ export async function exportToEpub(project: BookProject): Promise<void> {
       hasMath: chapterXml.includes('<math'),
     });
   });
+
+  // Cover page document for books that have a cover image but no designed cover page
+  const needsCoverDoc = !!cover && !hasCoverPage;
+  if (needsCoverDoc && cover) {
+    zip.file(
+      'OEBPS/chapters/cover.xhtml',
+      `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${project.metadata.language || 'en'}">
+<head>
+  <meta charset="utf-8" />
+  <title>Cover</title>
+  <link rel="stylesheet" type="text/css" href="../css/style.css" />
+</head>
+<body class="epub-body-doc">
+  <section epub:type="cover"><div class="epub-cover"><img src="../images/${cover.file}" alt="Cover"/></div></section>
+</body>
+</html>`
+    );
+  }
 
   // Optional Colophon / Credits chapter if attributions exist
   const attributions = project.metadata.attributions || [];
@@ -660,6 +799,33 @@ export async function exportToEpub(project: BookProject): Promise<void> {
   }
 
   // 5. OEBPS/nav.xhtml (EPUB 3 Navigation Document)
+  const isFixedBook = project.layoutMode === 'fixed';
+  const pageHref = (i: number) => `chapters/chapter-${i + 1}.xhtml`;
+  const tocEntries = isFixedBook ? buildTocEntries(project) : [];
+  const navItems =
+    tocEntries.length > 0
+      ? tocEntries.map((e) => ({ level: e.level, title: `${e.label ? e.label + ' ' : ''}${e.title}`, href: pageHref(e.pageIndex) }))
+      : chapterEntries.map((c) => ({ level: 1, title: c.title, href: `chapters/${c.filename}` }));
+
+  const pageListHtml = isFixedBook
+    ? `<nav epub:type="page-list" hidden="hidden"><ol>${project.chapters
+        .map((_, i) => ({ i, n: getPrintedNumber(project, i) }))
+        .filter((x) => x.n)
+        .map((x) => `<li><a href="${pageHref(x.i)}">${escapeXml(x.n)}</a></li>`)
+        .join('')}</ol></nav>`
+    : '';
+
+  const firstBody = project.chapters.findIndex((c) => !c.kind || c.kind === 'content');
+  const tocPageIdx = project.chapters.findIndex((c) => c.kind === 'toc');
+  const titleIdx = project.chapters.findIndex((c) => c.kind === 'title');
+  const landmarks: { type: string; title: string; href: string }[] = [];
+  if (hasCoverPage) landmarks.push({ type: 'cover', title: 'Cover', href: pageHref(project.chapters.findIndex((c) => c.kind === 'cover')) });
+  else if (needsCoverDoc) landmarks.push({ type: 'cover', title: 'Cover', href: 'chapters/cover.xhtml' });
+  if (titleIdx >= 0) landmarks.push({ type: 'titlepage', title: 'Title page', href: pageHref(titleIdx) });
+  landmarks.push({ type: 'toc', title: 'Table of contents', href: tocPageIdx >= 0 ? pageHref(tocPageIdx) : 'nav.xhtml#toc' });
+  const bodyHref = isFixedBook ? (firstBody >= 0 ? pageHref(firstBody) : null) : chapterEntries[0] ? `chapters/${chapterEntries[0].filename}` : null;
+  if (bodyHref) landmarks.push({ type: 'bodymatter', title: 'Start of content', href: bodyHref });
+
   const navXhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${project.metadata.language || 'en'}">
@@ -671,15 +837,12 @@ export async function exportToEpub(project: BookProject): Promise<void> {
 <body>
   <nav epub:type="toc" id="toc" role="doc-toc">
     <h1>Table of Contents</h1>
-    <ol>
-      ${chapterEntries
-        .map(
-          (c) => `
-        <li><a href="chapters/${c.filename}">${escapeXml(c.title)}</a></li>
-      `
-        )
-        .join('\n')}
-    </ol>
+    ${renderNavTree(navItems)}
+  </nav>
+  ${pageListHtml}
+  <nav epub:type="landmarks" hidden="hidden">
+    <h2>Guide</h2>
+    <ol>${landmarks.map((l) => `<li><a epub:type="${l.type}" href="${l.href}">${escapeXml(l.title)}</a></li>`).join('')}</ol>
   </nav>
 </body>
 </html>`;
@@ -697,6 +860,8 @@ export async function exportToEpub(project: BookProject): Promise<void> {
     <dc:language>${escapeXml(project.metadata.language || 'en')}</dc:language>
     <dc:creator id="creator">${escapeXml(project.metadata.author || 'Author')}</dc:creator>
     <meta property="dcterms:modified">${nowIso}</meta>
+    ${cover ? '<meta name="cover" content="cover-image"/>' : ''}
+    ${project.metadata.publisher ? `<dc:publisher>${escapeXml(project.metadata.publisher)}</dc:publisher>` : ''}
     ${project.metadata.description ? `<dc:description>${escapeXml(project.metadata.description)}</dc:description>` : ''}
     ${attributions
       .map(
@@ -708,6 +873,8 @@ export async function exportToEpub(project: BookProject): Promise<void> {
   <manifest>
     <item id="style" href="css/style.css" media-type="text/css"/>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    ${cover ? `<item id="cover-image" href="images/${cover.file}" media-type="${cover.mime}" properties="cover-image"/>` : ''}
+    ${needsCoverDoc ? '<item id="cover-doc" href="chapters/cover.xhtml" media-type="application/xhtml+xml"/>' : ''}
     ${chapterEntries
       .map(
         (c) => `
@@ -717,6 +884,7 @@ export async function exportToEpub(project: BookProject): Promise<void> {
       .join('')}
   </manifest>
   <spine>
+    ${needsCoverDoc ? '<itemref idref="cover-doc"/>' : ''}
     ${chapterEntries
       .map(
         (c) => `

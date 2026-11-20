@@ -24,6 +24,10 @@ function htmlToPlainText(html: string): string {
 import { getArtboardHeightRatio, getArtboardWidthPct } from '../utils/artboard';
 import { getPageContext, getPageRegions } from '../utils/pageLayout';
 import { renderFixedPageHtml, FIXED_PAGE_CSS, drawZoneOnCanvas } from './fixedPage';
+import { withExportContext } from './exportContext';
+import { buildTocEntries } from '../utils/pageLayout';
+import { selectTocEntries } from '../components/blocks/TocBlock';
+import { getCopyrightData, getTitlePageData, DEFAULT_RIGHTS_STATEMENT } from '../utils/bookFeatures';
 
 export type ScreenRatioKey = 'mobile' | 'tablet' | 'laptop' | 'comic' | 'square';
 
@@ -236,6 +240,15 @@ export function estimateNodeHeight(
       }
       return Math.min(usablePageHeight - 12, Math.ceil(contentWidth * 0.68 + 90));
     }
+
+    case 'TitlePageBlock':
+      return p.variant === 'cover' || p.variant === 'back' ? usablePageHeight : 360;
+
+    case 'CopyrightBlock':
+      return 300;
+
+    case 'TocBlock':
+      return 26 * Math.max(4, Number(p.limit) || 14) + 20;
 
     case 'TableBlock':
     case 'Table': {
@@ -798,7 +811,10 @@ export async function exportToHtmlZipPack(project: BookProject): Promise<void> {
   }
 
   // 2. Write shared stylesheet & interactive runtime JS
-  assetsFolder?.file('style.css', getWebPublicationStyles(project.designSystem));
+  assetsFolder?.file(
+    'style.css',
+    getWebPublicationStyles(project.designSystem) + (project.layoutMode === 'fixed' ? FIXED_PAGE_CSS : '')
+  );
   assetsFolder?.file('reader.js', getWebRuntimeJs());
   assetsFolder?.file(
     'credits.json',
@@ -844,11 +860,67 @@ export async function exportToHtmlZipPack(project: BookProject): Promise<void> {
 
   const chapterLinks: { file: string; title: string; htmlBody: string }[] = [];
 
+  const isFixedPack = project.layoutMode === 'fixed' && !!project.pageSetup;
   project.chapters.forEach((chapter, idx) => {
-    const nodes = parseCraftState(chapter.craftStateJson || '');
-    const bodyHtml = nodes.map(renderWebNode).join('\n');
+    const nodes = chapter.craftStateJson || !isFixedPack ? parseCraftState(chapter.craftStateJson || '') : [];
     const filename = `chapter-${idx + 1}.html`;
-    chapterLinks.push({ file: `chapters/${filename}`, title: chapter.title, htmlBody: bodyHtml });
+    const bodyHtml = isFixedPack
+      ? withExportContext({ project, hrefFor: (i) => `chapter-${i + 1}.html` }, () =>
+          renderFixedPageHtml(project, idx, nodes, renderWebNode)
+        )
+      : nodes.map(renderWebNode).join('\n');
+    // index.html sits one folder above chapters/, so its copy of the page links with a chapters/ prefix
+    const indexBodyHtml = isFixedPack
+      ? withExportContext({ project, hrefFor: (i) => `chapters/chapter-${i + 1}.html` }, () =>
+          renderFixedPageHtml(project, idx, nodes, renderWebNode)
+        )
+      : bodyHtml;
+    chapterLinks.push({ file: `chapters/${filename}`, title: chapter.title, htmlBody: indexBodyHtml });
+
+    if (isFixedPack) {
+      const setup = project.pageSetup!;
+      const doc = `<!DOCTYPE html>
+<html lang="${project.metadata.language || 'en'}">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${chapter.title} — ${project.metadata.title || project.title}</title>
+  <link rel="stylesheet" href="../assets/style.css" />
+  <style>
+    html, body { margin: 0; background: #E5E7EB; }
+    .fx-nav { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 16px; background:#141414; color:#fff; font:12px 'JetBrains Mono',monospace; }
+    .fx-nav a { color:#FFD23F; text-decoration:none; font-weight:700; }
+    .fx-stage { display:flex; justify-content:center; }
+    .fx-scale { transform-origin: top center; box-shadow: 0 2px 16px rgba(0,0,0,0.25); background:#fff; }
+  </style>
+</head>
+<body>
+  <nav class="fx-nav">
+    <a href="../index.html">← CONTENTS</a>
+    <span>PAGE ${idx + 1} OF ${project.chapters.length}</span>
+    <span>${idx > 0 ? `<a href="chapter-${idx}.html">‹ PREV</a>` : ''} ${idx < project.chapters.length - 1 ? `<a href="chapter-${idx + 2}.html">NEXT ›</a>` : ''}</span>
+  </nav>
+  <div class="fx-stage"><div class="fx-scale" id="fx-scale">${bodyHtml}</div></div>
+  <script>
+    (function () {
+      var W = ${Math.round(setup.width)}, H = ${Math.round(setup.height)};
+      function fit() {
+        var pad = window.innerWidth > W + 32 ? 16 : 0;
+        document.querySelector('.fx-stage').style.padding = pad + 'px';
+        var s = Math.min(1, (window.innerWidth - pad * 2) / W);
+        var el = document.getElementById('fx-scale');
+        el.style.transform = 'scale(' + s + ')';
+        el.style.height = H + 'px';
+        el.style.marginBottom = (H * s - H) + 'px';
+      }
+      fit(); window.addEventListener('resize', fit);
+    })();
+  </script>
+</body>
+</html>`;
+      chaptersFolder?.file(filename, doc);
+      return;
+    }
 
     const standaloneChapterHtml = `<!DOCTYPE html>
 <html lang="${project.metadata.language || 'en'}">
@@ -1382,6 +1454,148 @@ export async function renderPageGrabToCanvasDataUrl(
           }
           curY += 8;
         }
+        break;
+      }
+
+      case 'TitlePageBlock': {
+        const d = getTitlePageData(project);
+        const variant = p.variant || 'title';
+        const color = p.textColor || '#111111';
+        const align: 'left' | 'center' | 'right' = p.align || 'center';
+        const full = variant === 'cover' || variant === 'back';
+        const areaY = full ? 0 : curY;
+        const areaH = full ? preset.height : Math.min(availH, 360);
+        if (p.backgroundImage) {
+          const bgImg = await loadImageForCanvas(p.backgroundImage);
+          if (bgImg) {
+            const r = Math.max(preset.width / bgImg.width, preset.height / bgImg.height);
+            const w = bgImg.width * r;
+            const h = bgImg.height * r;
+            ctx.drawImage(bgImg, (preset.width - w) / 2, (preset.height - h) / 2, w, h);
+            if ((p.overlay ?? 0) > 0) {
+              ctx.fillStyle = `rgba(0,0,0,${(p.overlay ?? 0) / 100})`;
+              ctx.fillRect(0, 0, preset.width, preset.height);
+            }
+          }
+        }
+        const left = full ? 28 : padX;
+        const width = (full ? preset.width - 56 : contentW);
+        const anchorX = align === 'left' ? left : align === 'right' ? left + width : left + width / 2;
+        ctx.fillStyle = color;
+        ctx.textAlign = align;
+        const centerY = areaY + areaH * 0.38;
+        let y = centerY - 40;
+        const put = (text: string, font: string, gap: number, maxLines = 4) => {
+          if (!text) return;
+          ctx.font = font;
+          const words = text.split(/\s+/);
+          let line = '';
+          const out: string[] = [];
+          for (const w of words) {
+            const test = line ? `${line} ${w}` : w;
+            if (ctx.measureText(test).width > width && line) {
+              out.push(line);
+              line = w;
+            } else line = test;
+          }
+          if (line) out.push(line);
+          const size = parseInt(font.match(/(\d+)px/)?.[1] || '14', 10);
+          out.slice(0, maxLines).forEach((l) => {
+            ctx.fillText(l, anchorX, y);
+            y += size * 1.2;
+          });
+          y += gap;
+        };
+        if (variant === 'cover' || variant === 'title') {
+          const size = Math.round((p.titleSize ?? 38) * (preset.width / 390) * 0.9);
+          put(d.title, `800 ${size}px ${T.head}`, 8);
+          if ((p.showSubtitle ?? true) && d.subtitle) put(d.subtitle, `400 ${Math.round(size * 0.45)}px ${T.sans}`, 12);
+          if ((p.showAuthor ?? true) && d.author) put(d.author, `600 16px ${T.sans}`, 6);
+          if ((p.showPublisher ?? true) && d.publisher) put(d.publisher, `400 12px ${T.sans}`, 0);
+        } else if (variant === 'back') {
+          put(p.text || d.description, `400 15px ${T.sans}`, 10, 12);
+          if ((p.showAuthor ?? true) && d.author) put(d.author, `700 13px ${T.sans}`, 4);
+          if ((p.showPublisher ?? true) && d.publisher) put(d.publisher, `400 12px ${T.sans}`, 4);
+          if (d.isbn) put(`ISBN ${d.isbn}`, `400 11px ${T.sans}`, 0);
+        } else {
+          put(p.text || 'For everyone who reads this.', `italic 400 20px ${T.sans}`, 0, 8);
+        }
+        ctx.textAlign = 'left';
+        if (!full) curY += areaH + 8;
+        break;
+      }
+
+      case 'CopyrightBlock': {
+        const c = getCopyrightData(project);
+        const fs = p.fontSize ?? 11;
+        ctx.fillStyle = T.ink;
+        const writeLines = (text: string, bold = false) => {
+          if (!text) return;
+          ctx.font = `${bold ? 700 : 400} ${fs}px ${T.sans}`;
+          curY = drawWrappedText(ctx, text, padX, curY, contentW, fs * 1.45, 12) + 6;
+        };
+        writeLines(c.copyrightLine, true);
+        if (c.author) writeLines(`Written by ${c.author}`);
+        [c.publisherLine, c.isbnLine, c.editionLine, c.classification].forEach((l) => writeLines(l));
+        if (p.showLegalBox ?? true) {
+          const boxTop = curY;
+          ctx.font = `400 ${fs}px ${T.sans}`;
+          const end = drawWrappedText(ctx, c.rightsStatement || DEFAULT_RIGHTS_STATEMENT, padX + 8, boxTop + 8, contentW - 16, fs * 1.45, 12);
+          ctx.strokeStyle = T.ink;
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(padX, boxTop, contentW, end - boxTop + 8);
+          curY = end + 16;
+        }
+        writeLines(c.contact);
+        if ((p.showDisclaimer ?? true) && c.disclaimer) {
+          writeLines('Disclaimer', true);
+          writeLines(c.disclaimer);
+        }
+        break;
+      }
+
+      case 'TocBlock': {
+        const entries = selectTocEntries(buildTocEntries(project), p);
+        const fs = p.fontSize ?? 13;
+        const rowH = fs * 1.7;
+        for (const e of entries) {
+          if (curY + rowH > maxBottomY) break;
+          const indent = (e.level - 1) * 14;
+          const bold = e.level === 1;
+          ctx.fillStyle = T.ink;
+          ctx.font = `${bold ? 700 : 400} ${fs}px ${T.sans}`;
+          let x = padX + indent;
+          if (e.label) {
+            ctx.font = `700 ${Math.max(9, fs - 3)}px ${T.sans}`;
+            const lw = ctx.measureText(e.label).width + 10;
+            ctx.fillStyle = p.accentColor || project.pageSetup?.accentColor || '#2563EB';
+            ctx.fillRect(x, curY, lw, fs + 3);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillText(e.label, x + 5, curY + 2);
+            x += lw + 6;
+            ctx.fillStyle = T.ink;
+            ctx.font = `${bold ? 700 : 400} ${fs}px ${T.sans}`;
+          }
+          ctx.fillText(e.title, x, curY);
+          if (p.showPageNumbers ?? true) {
+            const pw = ctx.measureText(e.printed).width;
+            ctx.fillText(e.printed, padX + contentW - pw, curY);
+            if ((p.leader ?? 'dots') === 'dots') {
+              const startX = x + ctx.measureText(e.title).width + 6;
+              ctx.save();
+              ctx.globalAlpha = 0.45;
+              ctx.setLineDash([1.5, 3]);
+              ctx.lineWidth = 1.2;
+              ctx.beginPath();
+              ctx.moveTo(startX, curY + fs);
+              ctx.lineTo(padX + contentW - pw - 6, curY + fs);
+              ctx.stroke();
+              ctx.restore();
+            }
+          }
+          curY += rowH;
+        }
+        curY += 8;
         break;
       }
 

@@ -14,6 +14,9 @@ import { VisualGalleryBlock } from '../../blocks/VisualGalleryBlock';
 import { AudioNarrationBlock } from '../../blocks/AudioNarrationBlock';
 import { FreeformCanvasBlock } from '../../blocks/FreeformCanvasBlock';
 import { TableBlock } from '../../blocks/TableBlock';
+import { TitlePageBlock } from '../../blocks/TitlePageBlock';
+import { CopyrightBlock } from '../../blocks/CopyrightBlock';
+import { TocBlock } from '../../blocks/TocBlock';
 import {
   Type,
   Image as ImageIcon,
@@ -29,11 +32,15 @@ import {
   Volume2,
   Palette,
   Table as TableIcon,
+  BookMarked,
+  Copyright,
+  ListOrdered,
 } from 'lucide-react';
 
 export const BlockPalette: React.FC = () => {
   const { connectors, actions, query } = useEditor();
   const setLeftRailOpen = useEditorStore((st) => st.setLeftRailOpen);
+  const isFixedBook = useEditorStore((st) => st.project.layoutMode === 'fixed');
   // Tile DOM node -> the element it creates. Drag (mouse) goes through Craft's HTML5 drag-and-drop,
   // which touch screens don't support, so every tile can also be tapped to insert it.
   const tiles = useRef(new Map<HTMLElement, React.ReactElement>());
@@ -278,6 +285,30 @@ export const BlockPalette: React.FC = () => {
                 <span className="text-[10px] font-mono text-gray-500">Editable rows, columns &amp; LaTeX cells</span>
               </div>
             </div>
+
+            {/* Book features (fixed-layout books): smart blocks that fill themselves from the book data */}
+            {isFixedBook &&
+              (
+                [
+                  { key: 'title', title: 'Cover / Title Page', desc: 'From title, author & publisher', icon: <BookMarked className="w-5 h-5 text-neo-vermilion" strokeWidth={2.5} />, el: <TitlePageBlock /> },
+                  { key: 'copyright', title: 'Copyright Page', desc: 'Publisher, ISBN, rights & disclaimer', icon: <Copyright className="w-5 h-5 text-neo-vermilion" strokeWidth={2.5} />, el: <CopyrightBlock /> },
+                  { key: 'toc', title: 'Table of Contents', desc: 'Automatic, with page numbers & links', icon: <ListOrdered className="w-5 h-5 text-neo-vermilion" strokeWidth={2.5} />, el: <TocBlock /> },
+                ] as const
+              ).map((f) => (
+                <div
+                  key={f.key}
+                  ref={(ref) => {
+                    if (ref) connectors.create(ref, f.el);
+                  }}
+                  className="group flex items-center gap-3 p-3 bg-neo-yellow/20 border-neo border-neo-ink rounded-lg shadow-neo-sm hover:shadow-neo cursor-grab active:cursor-grabbing transition-all"
+                >
+                  <div className="p-2 bg-white rounded border border-neo-ink">{f.icon}</div>
+                  <div className="flex flex-col">
+                    <span className="font-heading font-bold text-xs text-neo-ink">{f.title}</span>
+                    <span className="text-[10px] font-mono text-gray-600">{f.desc}</span>
+                  </div>
+                </div>
+              ))}
 
             {/* Editorial Callout Box */}
             <div

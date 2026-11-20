@@ -30,6 +30,9 @@ import { VisualGalleryBlock } from '../blocks/VisualGalleryBlock';
 import { AudioNarrationBlock } from '../blocks/AudioNarrationBlock';
 import { FreeformCanvasBlock } from '../blocks/FreeformCanvasBlock';
 import { TableBlock } from '../blocks/TableBlock';
+import { TitlePageBlock } from '../blocks/TitlePageBlock';
+import { CopyrightBlock } from '../blocks/CopyrightBlock';
+import { TocBlock } from '../blocks/TocBlock';
 
 export const EditorWorkspace: React.FC = () => {
   const {
@@ -167,6 +170,9 @@ export const EditorWorkspace: React.FC = () => {
           AudioNarrationBlock,
           FreeformCanvasBlock,
           TableBlock,
+          TitlePageBlock,
+          CopyrightBlock,
+          TocBlock,
         }}
         indicator={{
           success: '#FF5E3A', // Neo-vermilion drop line indicator!

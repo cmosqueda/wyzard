@@ -63,6 +63,16 @@ export const WebReaderModal: React.FC<WebReaderModalProps> = ({
   const [engine, setEngine] = useState<ReaderEngineMode>(initialEngine);
   const [activeChapterId, setActiveChapterId] = useState<string>(project.activeChapterId);
 
+  // Table-of-contents links inside the reader iframe ask us to open another page
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const id = e.data && (e.data as { wyzardGoto?: string }).wyzardGoto;
+      if (typeof id === 'string' && project.chapters.some((c) => c.id === id)) setActiveChapterId(id);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [project.chapters]);
+
   // Unified Screen Ratio state across HTML Reader, Page-Grab PDF, and CBZ Comic Reader
   const [ratioKey, setRatioKey] = useState<ScreenRatioKey>(initialRatio);
   const [htmlFullWidth, setHtmlFullWidth] = useState<boolean>(false);
