@@ -1,6 +1,6 @@
 # Spec: Fixed-layout books and book features
 
-Status: phases 1 and 2 implemented · phase 3 planned
+Status: phases 1, 2 and 3 implemented
 Owner: Rocket Puncher · Last updated: 2026-11-20
 
 ## 1. Why
@@ -50,7 +50,7 @@ Non-goals (for now)
 | --- | --- | --- |
 | 1 | Fixed-layout project type, page sizes (editable), manual pages, margins and guides, running header and footer designer with tokens, sections, page numbering, HTML / PDF / CBZ export of authored pages | Done |
 | 2 | Book-feature pages and smart blocks, automatic table of contents with links, numbering runs, section levels, EPUB cover, landmarks, nested navigation and page list | Done |
-| 3 | Fixed-layout EPUB (pre-paginated), print PDF with bleed and crop marks, facing pages with left / right masters and first-page variants, index and glossary, textbook starter template | Planned |
+| 3 | Fixed-layout EPUB (pre-paginated), print PDF with bleed and crop marks, facing pages with left / right masters and first-page variants, index and glossary, textbook starter template | Done |
 
 ## 4. Data model
 
@@ -61,6 +61,7 @@ BookProject {
   layoutMode?: 'reflowable' | 'fixed'
   pageSetup?: PageSetup        // size, margins, numbering, header, footer, accent colour
   sections?: BookSection[]     // grouping used by tokens and the table of contents
+  terms?: BookTerm[]           // index and glossary terms (phase 3)
   chapters: Chapter[]          // in fixed mode, each chapter IS one page
 }
 
@@ -69,7 +70,11 @@ PageSetup {
   margins { top right bottom left }
   showGuides, numbering { start, style }, accentColor?
   header: HeaderFooterZone, footer: HeaderFooterZone
+  facing?: boolean                              // phase 3: left / right master pages
+  sectionStart?: { hideHeader?, hideFooter? }   // phase 3: variant for the first page of a section
 }
+
+BookTerm { id, term, definition?, inIndex? }
 
 HeaderFooterZone { enabled, height, background, color, borderColor, borderWidth, left?, center?, right? }
 ZoneSlot { text (with tokens), size?, bold?, color?, bg?, padX? }
@@ -78,7 +83,7 @@ BookSection { id, title, subtitle?, number?, color?, level?, tocLabel?, inToc? }
 
 Chapter (page) {
   sectionId?, hideHeader?, hideFooter?, fullBleed?,
-  kind?: 'cover' | 'title' | 'copyright' | 'dedication' | 'preface' | 'toc' | 'backCover' | 'content',
+  kind?: 'cover' | 'title' | 'copyright' | 'dedication' | 'preface' | 'toc' | 'glossary' | 'index' | 'backCover' | 'content',
   tocEntry?: { title?, level: 1 | 2 | 3 },
   numbering?: { start, style }  // starts a new numbering run at this page
 }
@@ -162,13 +167,13 @@ Smart blocks are available in the block palette for fixed-layout books.
 
 ### 5.6 Exports
 
-| Output | Phase 1 | Phase 2 additions |
-| --- | --- | --- |
+| Output | Phase 1 | Phase 2 additions | Phase 3 |
+| --- | --- | --- | --- |
 | HTML reader and HTML pack | Exact-size pages with header and footer | Contents entries are links. In the pack they point to `chapter-N.html`; in the in-app reader they switch pages |
 | PDF | Exact-size pages | Contents entries are internal links (`#page-N`) |
 | CBZ | Page plates with header and footer | Cover, title, copyright and contents drawn on the plates |
 | EPUB | Pages as reflowable chapters | Cover image (uploaded, or rendered from the cover page), `cover-image` manifest property, landmarks (cover, title page, contents, start of content), nested navigation document, page list with printed numbers, structural `epub:type`s per page kind, contents links between page files |
-| Fixed-layout EPUB | n/a | Phase 3 |
+| Fixed-layout EPUB | n/a | n/a | Phase 3, see 5.9 |
 
 ## 6. Acceptance criteria (phase 2)
 
@@ -183,15 +188,63 @@ Smart blocks are available in the block palette for fixed-layout books.
 6. A book with a cover image or cover page has a valid cover in the EPUB package.
 7. Reflowable projects behave exactly as before.
 
-## 7. Phase 3 plan
+## 7. Phase 3 (implemented)
 
-- **Fixed-layout EPUB:** `rendition:layout=pre-paginated`, a viewport per page, each page as one XHTML with
-  absolutely positioned content, the same navigation, landmarks and page list.
-- **Print PDF:** trim size with bleed, crop marks, safe area and facing-page spreads.
-- **Master pages:** left / right (odd / even) and first-page-of-section variants for the header, footer and margins.
-- **Index and glossary:** entries tagged in text, generated pages with links.
-- **Textbook starter template** modelled on the reference book.
-- **Possible follow-ups:** a "move overflow to a new page" helper and optional automatic text flow.
+### 7.1 Master pages
+`PageSetup.facing` turns on facing pages. The first page is a right-hand page, the second a left-hand page, and so
+on. On left-hand pages the left and right margins swap (the left margin is the inner, binding margin) and the
+slots of the header and footer are mirrored, so page numbers and running titles sit on the outside edge.
+`PageSetup.sectionStart` hides the header and / or footer on the first page of each section (chapter openers).
+Everything that lays out a page asks `getEffectiveSetup(project, pageIndex)`, so the editor, HTML, PDF, EPUB and CBZ agree.
+
+### 7.2 Print-ready PDF
+Export, Print-ready PDF. Options: bleed (none, 3, 5 or 6 mm), crop marks, facing-page spreads (needs facing pages)
+and safe-area guides (preview only, never printed).
+- A sheet is the trim size plus the bleed plus a slug area that holds the crop marks. The background of each page
+  runs into the bleed. Full-bleed pages (covers, openers) are scaled up just enough to cover it.
+- With spreads, the cover is alone, then left and right pages are paired on one sheet; the last odd page is alone.
+  Each sheet gets its own CSS page size, so the PDF contains single and double pages together.
+- The document opens in a print window; choosing "Save as PDF" writes it.
+
+### 7.3 Fixed-layout EPUB
+Export, EPUB, with "Fixed-layout EPUB (pre-paginated)" ticked (the default for fixed books):
+- `rendition:layout` is `pre-paginated`; `rendition:spread` is `both` with facing pages, otherwise `none`.
+- Every page is one XHTML file with a `viewport` of the page size and the header, footer and body positioned
+  as authored. Facing books get `page-spread-left` / `page-spread-right` on the spine items.
+- The navigation document (nested contents, page list, landmarks) and the cover are the same as in phase 2.
+- Credits pages are marked `rendition:layout-reflowable`.
+- Untick the option for the reflowable EPUB of phase 2.
+
+### 7.4 Index and glossary
+`BookProject.terms` holds `{ term, definition?, inIndex? }`, edited in Page setup, Index & glossary.
+- The `Index / Glossary` block (variant index or glossary) is generated from the terms. An index entry lists every
+  page whose typed text contains the term as a whole word (case-insensitive), with printed page numbers that link
+  to the pages. Contents, copyright, index and glossary blocks and non-content pages are not searched.
+- Book pages adds a Glossary or an Index page; they go before the back cover and are listed in the contents.
+- Rendered in the editor, HTML, PDF, EPUB (`doc-index` / `doc-glossary`) and CBZ.
+
+### 7.5 Textbook starter
+New project, Textbook starter: cover, title, copyright, preface and contents in roman numerals; then Unit 1 with a
+full-bleed opener, Chapter 1 (opener), a lesson with two pages, an activity (purple) and a final reflection (red),
+each its own coloured section at levels 1 to 3; then glossary, index and back cover. Page numbers restart at the unit
+opener. The Textbook band header and footer from phase 1 are used. Every page can be edited, moved or deleted.
+
+### 7.6 Acceptance criteria (phase 3)
+1. Turning on facing pages mirrors margins and header / footer slots on left-hand pages in the editor and in exports.
+2. Hiding the header / footer on section starts affects only the first page of each section.
+3. The print PDF has one sheet per page (or per spread), with the chosen bleed and crop marks; the PDF's pages
+   have the sheet sizes (single and double pages when spreads are on).
+4. The fixed-layout EPUB has `pre-paginated` metadata, a viewport per page, valid XHTML and working contents links.
+5. The index lists terms alphabetically with the right printed page numbers; the glossary lists definitions.
+6. The textbook starter opens with its sections, numbering runs, contents, glossary and index filled in.
+7. Reflowable projects and fixed books without these options behave as before.
+
+### 7.7 Follow-ups
+- Automatic text flow and a "move overflow to a new page" helper.
+- Explicit per-side master pages (different content on left and right, rather than mirroring).
+- Index terms tagged inside the text, sub-entries and "see also".
+- Bundling uploaded (`blob:`) images inside EPUBs.
+- A true PDF writer (the print window relies on the browser's "Save as PDF").
 
 ## 8. Risks and notes
 

@@ -22,12 +22,12 @@ function htmlToPlainText(html: string): string {
   ).trim();
 }
 import { getArtboardHeightRatio, getArtboardWidthPct } from '../utils/artboard';
-import { getPageContext, getPageRegions } from '../utils/pageLayout';
+import { getEffectiveSetup, getPageContext, getPageRegions } from '../utils/pageLayout';
 import { renderFixedPageHtml, FIXED_PAGE_CSS, drawZoneOnCanvas } from './fixedPage';
 import { withExportContext } from './exportContext';
 import { buildTocEntries } from '../utils/pageLayout';
 import { selectTocEntries } from '../components/blocks/TocBlock';
-import { getCopyrightData, getTitlePageData, DEFAULT_RIGHTS_STATEMENT } from '../utils/bookFeatures';
+import { getCopyrightData, getTitlePageData, DEFAULT_RIGHTS_STATEMENT, buildIndexEntries, getGlossaryEntries } from '../utils/bookFeatures';
 
 export type ScreenRatioKey = 'mobile' | 'tablet' | 'laptop' | 'comic' | 'square';
 
@@ -250,6 +250,9 @@ export function estimateNodeHeight(
     case 'TocBlock':
       return 26 * Math.max(4, Number(p.limit) || 14) + 20;
 
+    case 'TermsBlock':
+      return 300;
+
     case 'TableBlock':
     case 'Table': {
       const rowsArr: any[] = Array.isArray(p.rows) ? p.rows : [[]];
@@ -400,7 +403,7 @@ function paginateFixedBook(project: BookProject, onlyChapterId?: string): Pagina
   const pages: PaginatedPage[] = [];
   project.chapters.forEach((chapter, idx) => {
     if (onlyChapterId && chapter.id !== onlyChapterId) return;
-    const regions = getPageRegions(setup, chapter);
+    const regions = getPageRegions(getEffectiveSetup(project, idx), chapter);
     const nodes = chapter.craftStateJson ? parseCraftState(chapter.craftStateJson) : [];
     const items: PaginatedBlockItem[] = nodes.map((node) => ({
       node,
@@ -1171,7 +1174,7 @@ export async function renderPageGrabToCanvasDataUrl(
 
   // Fixed-layout book pages use the authored regions (margins, header, footer) instead of the comic folio
   const fxPage = page.fixed && project.pageSetup ? project.chapters[page.chapterIndex] : null;
-  const fx = fxPage ? getPageRegions(project.pageSetup!, fxPage) : null;
+  const fx = fxPage ? getPageRegions(getEffectiveSetup(project, page.chapterIndex), fxPage) : null;
 
   // 1. Paper Background & Neo-Brutalist Comic Frame
   ctx.fillStyle = fxPage?.backgroundColor || '#FFFFFF';
@@ -1551,6 +1554,26 @@ export async function renderPageGrabToCanvasDataUrl(
           writeLines('Disclaimer', true);
           writeLines(c.disclaimer);
         }
+        break;
+      }
+
+      case 'TermsBlock': {
+        const fs = p.fontSize ?? 12;
+        ctx.fillStyle = T.ink;
+        if ((p.variant ?? 'index') === 'glossary') {
+          for (const g of getGlossaryEntries(project)) {
+            if (curY + fs * 1.5 > maxBottomY) break;
+            ctx.font = `400 ${fs}px ${T.sans}`;
+            curY = drawWrappedText(ctx, `${g.term} — ${g.definition}`, padX, curY, contentW, fs * 1.45, 4) + 6;
+          }
+        } else {
+          for (const e of buildIndexEntries(project)) {
+            if (curY + fs * 1.5 > maxBottomY) break;
+            ctx.font = `400 ${fs}px ${T.sans}`;
+            curY = drawWrappedText(ctx, `${e.term}, ${e.pages.map((x) => x.printed || x.pageIndex + 1).join(', ')}`, padX, curY, contentW, fs * 1.45, 3) + 3;
+          }
+        }
+        curY += 8;
         break;
       }
 

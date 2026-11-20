@@ -17,6 +17,7 @@ import { TableBlock } from '../../blocks/TableBlock';
 import { TitlePageBlock } from '../../blocks/TitlePageBlock';
 import { CopyrightBlock } from '../../blocks/CopyrightBlock';
 import { TocBlock } from '../../blocks/TocBlock';
+import { TermsBlock } from '../../blocks/TermsBlock';
 import {
   Type,
   Image as ImageIcon,
@@ -293,6 +294,7 @@ export const BlockPalette: React.FC = () => {
                   { key: 'title', title: 'Cover / Title Page', desc: 'From title, author & publisher', icon: <BookMarked className="w-5 h-5 text-neo-vermilion" strokeWidth={2.5} />, el: <TitlePageBlock /> },
                   { key: 'copyright', title: 'Copyright Page', desc: 'Publisher, ISBN, rights & disclaimer', icon: <Copyright className="w-5 h-5 text-neo-vermilion" strokeWidth={2.5} />, el: <CopyrightBlock /> },
                   { key: 'toc', title: 'Table of Contents', desc: 'Automatic, with page numbers & links', icon: <ListOrdered className="w-5 h-5 text-neo-vermilion" strokeWidth={2.5} />, el: <TocBlock /> },
+                  { key: 'terms', title: 'Index / Glossary', desc: 'From the terms list, with page links', icon: <ListOrdered className="w-5 h-5 text-neo-vermilion" strokeWidth={2.5} />, el: <TermsBlock /> },
                 ] as const
               ).map((f) => (
                 <div

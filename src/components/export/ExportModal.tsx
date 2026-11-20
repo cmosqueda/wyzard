@@ -3,6 +3,7 @@ import { useEditorStore } from '../../store/editorStore';
 import { notify } from '../../store/toastStore';
 import { runPreflightValidation } from '../../compiler/preflight';
 import { exportToEpub } from '../../compiler/epubCompiler';
+import { exportToPrintPdf, DEFAULT_PRINT_OPTIONS, type PrintPdfOptions } from '../../compiler/printPdf';
 import {
   SCREEN_RATIO_PRESETS,
   type ScreenRatioKey,
@@ -52,6 +53,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       : SCREEN_RATIO_PRESETS[selectedRatio].label;
   const [busyFormat, setBusyFormat] = useState<'epub' | 'zip' | 'pdf' | 'cbz' | null>(null);
   const [cbzProgress, setCbzProgress] = useState<string>('');
+  const [fixedEpub, setFixedEpub] = useState(true);
+  const [print, setPrint] = useState<PrintPdfOptions>(DEFAULT_PRINT_OPTIONS);
 
   const paginatedPages = useMemo(() => {
     if (!isOpen) return [];
@@ -77,7 +80,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
     setBusyFormat('epub');
     try {
-      await exportToEpub(project);
+      await exportToEpub(project, { fixedLayout: isFixed && fixedEpub });
       notify({
         type: 'success',
         title: 'EPUB 3.3 Export Complete',
@@ -128,6 +131,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     } finally {
       setBusyFormat(null);
     }
+  };
+
+  const handleExportPrintPdf = () => {
+    const r = exportToPrintPdf(project, { ...print, spreads: print.spreads && !!project.pageSetup?.facing });
+    notify({
+      type: 'success',
+      title: 'Print-ready PDF opened',
+      message: `${r.pageCount} pages on ${r.sheetCount} sheets with ${print.bleedMm} mm bleed${print.cropMarks ? ' and crop marks' : ''}. Choose "Save as PDF" in the print dialog.`,
+    });
   };
 
   const handleExportCbz = async () => {
@@ -200,8 +212,82 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 </span>
               </div>
               <p className="font-mono text-[10px] text-gray-500 leading-snug">
-                HTML, PDF and CBZ keep the fixed pages. EPUB currently exports each page as a reflowable chapter; fixed-layout EPUB is planned.
+                HTML, PDF and CBZ keep the fixed pages exactly as authored.
               </p>
+              <label className="flex items-start gap-2 cursor-pointer text-xs text-neo-ink">
+                <input
+                  type="checkbox"
+                  checked={fixedEpub}
+                  onChange={(e) => setFixedEpub(e.target.checked)}
+                  className="w-4 h-4 mt-0.5 accent-neo-ink"
+                />
+                <span>
+                  Fixed-layout EPUB (pre-paginated)
+                  <span className="block text-[10px] font-mono text-gray-500 leading-snug">
+                    Every page looks exactly as designed. Turn off for a reflowable EPUB that adapts to the reader's screen.
+                  </span>
+                </span>
+              </label>
+              <div className="border-t border-gray-200 pt-2.5 flex flex-col gap-2" data-print-options>
+                <span className="font-heading font-bold text-xs text-neo-ink uppercase tracking-wider">Print-ready PDF</span>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neo-ink">
+                  <label className="flex items-center gap-1.5 font-mono text-[11px]">
+                    Bleed
+                    <select
+                      value={print.bleedMm}
+                      onChange={(e) => setPrint({ ...print, bleedMm: Number(e.target.value) })}
+                      className="bg-white border border-neo-ink px-1.5 py-1 rounded text-xs"
+                      aria-label="Bleed"
+                    >
+                      <option value={0}>None</option>
+                      <option value={3}>3 mm</option>
+                      <option value={5}>5 mm</option>
+                      <option value={6}>6 mm</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={print.cropMarks}
+                      onChange={(e) => setPrint({ ...print, cropMarks: e.target.checked })}
+                      className="w-4 h-4 accent-neo-ink"
+                    />
+                    Crop marks
+                  </label>
+                  <label
+                    className={`flex items-center gap-1.5 ${project.pageSetup?.facing ? 'cursor-pointer' : 'opacity-50'}`}
+                    title={project.pageSetup?.facing ? '' : 'Turn on Facing pages in Page setup'}
+                  >
+                    <input
+                      type="checkbox"
+                      disabled={!project.pageSetup?.facing}
+                      checked={print.spreads && !!project.pageSetup?.facing}
+                      onChange={(e) => setPrint({ ...print, spreads: e.target.checked })}
+                      className="w-4 h-4 accent-neo-ink"
+                    />
+                    Facing-page spreads
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!print.showSafeArea}
+                      onChange={(e) => setPrint({ ...print, showSafeArea: e.target.checked })}
+                      className="w-4 h-4 accent-neo-ink"
+                    />
+                    Safe-area guides (preview only)
+                  </label>
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={handleExportPrintPdf}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded border-neo border-neo-ink bg-neo-teal text-neo-ink font-mono text-xs font-bold shadow-neo-sm hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Open print-ready PDF</span>
+                  </button>
+                </div>
+              </div>
             </div>
           ) : (
           <div className="p-4 bg-white border-neo border-neo-ink rounded-xl shadow-neo-sm flex flex-col gap-3">

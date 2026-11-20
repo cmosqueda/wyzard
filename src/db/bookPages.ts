@@ -21,15 +21,20 @@ export const BOOK_PAGE_KITS: BookPageKit[] = [
   { kind: 'dedication', label: 'Dedication', description: 'A short dedication', unique: true },
   { kind: 'preface', label: 'Preface / foreword', description: 'Opening text, listed in the contents', unique: false },
   { kind: 'toc', label: 'Table of contents', description: 'Automatic, with page numbers and links', unique: false },
+  { kind: 'glossary', label: 'Glossary', description: 'Terms and definitions from Page setup', unique: true },
+  { kind: 'index', label: 'Index', description: 'Terms with the pages they appear on', unique: true },
   { kind: 'backCover', label: 'Back cover', description: 'Full-bleed blurb, publisher and ISBN', unique: true },
 ];
 
 /** Order of the front matter, used to decide where a new book page is inserted. */
 export const FRONT_MATTER_ORDER: PageKind[] = ['cover', 'title', 'copyright', 'dedication', 'preface', 'toc'];
 
+/** Order of the back matter, before the back cover. */
+export const BACK_MATTER_ORDER: PageKind[] = ['glossary', 'index'];
+
 type NodeSpec = { id: string; type: string; props: Record<string, unknown> };
 
-function pageJson(children: NodeSpec[]): string {
+export function pageJson(children: NodeSpec[]): string {
   const root = JSON.parse(createFixedPageCraftJson());
   root.ROOT.nodes = children.map((c) => c.id);
   children.forEach((c) => {
@@ -48,7 +53,7 @@ function pageJson(children: NodeSpec[]): string {
   return JSON.stringify(root);
 }
 
-const heading = (id: string, text: string, color = '#111111'): NodeSpec => ({
+export const heading = (id: string, text: string, color = '#111111'): NodeSpec => ({
   id,
   type: 'TypographyBlock',
   props: { variant: 'h1', fontFamily: 'heading', htmlContent: text, color, keepTogetherOnPageTurn: true },
@@ -142,6 +147,20 @@ export function createBookPage(kind: Exclude<PageKind, 'content'>, project: Book
         hideFooter: true,
         craftStateJson: pageJson([heading('h', 'TABLE OF CONTENTS', accent), { id: 'toc', type: 'TocBlock', props: { maxLevel: 3, from: 1, limit: 0, showPageNumbers: true, leader: 'dots', fontSize: 13 } }]),
       };
+    case 'glossary':
+    case 'index': {
+      const isIndex = kind === 'index';
+      return {
+        ...base,
+        title: isIndex ? 'Index' : 'Glossary',
+        slug: isIndex ? 'index' : 'glossary',
+        tocEntry: { level: 1 },
+        craftStateJson: pageJson([
+          heading('h', isIndex ? 'INDEX' : 'GLOSSARY', accent),
+          { id: 'terms', type: 'TermsBlock', props: { variant: isIndex ? 'index' : 'glossary', fontSize: 12, groupByLetter: true, columns: isIndex ? 2 : 1 } },
+        ]),
+      };
+    }
     case 'backCover':
       return {
         ...base,

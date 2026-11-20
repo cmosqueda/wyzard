@@ -3,7 +3,8 @@ import type { TitlePageBlockProps } from '../components/blocks/TitlePageBlock';
 import type { CopyrightBlockProps } from '../components/blocks/CopyrightBlock';
 import { selectTocEntries, type TocBlockProps } from '../components/blocks/TocBlock';
 import { buildTocEntries, DEFAULT_ACCENT } from '../utils/pageLayout';
-import { DEFAULT_RIGHTS_STATEMENT, getCopyrightData, getTitlePageData } from '../utils/bookFeatures';
+import { DEFAULT_RIGHTS_STATEMENT, buildIndexEntries, getCopyrightData, getGlossaryEntries, getTitlePageData } from '../utils/bookFeatures';
+import type { TermsBlockProps } from '../components/blocks/TermsBlock';
 
 /**
  * Static HTML / XHTML for the smart book-feature blocks (title page, copyright page, table of contents).
@@ -88,8 +89,39 @@ export function tocHtml(
   return `<nav class="wz-toc" role="doc-toc" style="font-size:${fs}px"><ol class="wz-toc-list">${items}</ol></nav>`;
 }
 
+export function termsHtml(
+  project: BookProject,
+  p: TermsBlockProps,
+  hrefFor: (pageIndex: number, pageId: string) => string
+): string {
+  const fs = p.fontSize ?? 12;
+  const cols = p.columns ?? 1;
+  const colStyle = cols > 1 ? `column-count:${cols};column-gap:20px;` : '';
+  if ((p.variant ?? 'index') === 'glossary') {
+    const items = getGlossaryEntries(project)
+      .map((g) => `<p class="wz-gl-item"><strong>${esc(g.term)}</strong> — ${esc(g.definition)}</p>`)
+      .join('');
+    return `<div class="wz-glossary" style="font-size:${fs}px;${colStyle}">${items || '<p>(No glossary entries yet)</p>'}</div>`;
+  }
+  const entries = buildIndexEntries(project);
+  const group = p.groupByLetter ?? true;
+  let html = '';
+  entries.forEach((e, i) => {
+    const letter = e.term[0]?.toUpperCase() || '';
+    if (group && (i === 0 || entries[i - 1].term[0]?.toUpperCase() !== letter)) html += `<div class="wz-ix-letter">${esc(letter)}</div>`;
+    html += `<div class="wz-ix-item">${esc(e.term)}, ${e.pages
+      .map((pg) => `<a href="${esc(hrefFor(pg.pageIndex, pg.pageId))}" data-wz-page="${esc(pg.pageId)}">${esc(pg.printed || String(pg.pageIndex + 1))}</a>`)
+      .join(', ')}</div>`;
+  });
+  return `<div class="wz-index" style="font-size:${fs}px;${colStyle}">${html || '<p>(No index entries yet)</p>'}</div>`;
+}
+
 /** Contents / title / copyright styles for HTML, PDF and the HTML pack. */
 export const BOOK_FEATURES_CSS = `
+.wz-ix-letter { font-weight: 800; margin-top: 10px; break-after: avoid; }
+.wz-ix-item { break-inside: avoid; margin: 2px 0; }
+.wz-index a { color: inherit; }
+.wz-gl-item { break-inside: avoid; margin: 8px 0 0; }
 .wz-toc-list { list-style: none; margin: 0; padding: 0; }
 .wz-toc a { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; color: inherit; text-decoration: none; }
 .wz-toc a:hover .wz-toc-title { text-decoration: underline; }
@@ -104,6 +136,10 @@ export const BOOK_FEATURES_CSS = `
 
 /** Simpler contents styles for reading systems (no flexbox leaders). */
 export const BOOK_FEATURES_EPUB_CSS = `
+.wz-ix-letter { font-weight: 800; margin-top: 10px; break-after: avoid; }
+.wz-ix-item { break-inside: avoid; margin: 2px 0; }
+.wz-index a { color: inherit; }
+.wz-gl-item { break-inside: avoid; margin: 8px 0 0; }
 .wz-toc-list { list-style: none; margin: 0; padding: 0; }
 .wz-toc-list li { margin: 0.25em 0; overflow: hidden; }
 .wz-toc-list a { color: inherit; text-decoration: none; }

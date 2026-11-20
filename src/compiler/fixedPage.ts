@@ -4,6 +4,7 @@ import { withExportContext } from './exportContext';
 import { BOOK_FEATURES_CSS } from './bookFeaturesHtml';
 import {
   getPageContext,
+  getEffectiveSetup,
   getPageRegions,
   resolveColor,
   resolveTokens,
@@ -70,7 +71,7 @@ export function renderFixedPageHtml(
 ): string {
   const setup = project.pageSetup!;
   const page = project.chapters[pageIndex];
-  const regions = getPageRegions(setup, page);
+  const regions = getPageRegions(getEffectiveSetup(project, pageIndex), page);
   const ctx = getPageContext(project, pageIndex);
   // Smart blocks (table of contents …) read the whole book through the export context
   const body = withExportContext({ project }, () =>

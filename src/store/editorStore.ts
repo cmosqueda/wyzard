@@ -9,6 +9,7 @@ import type {
   CanvasDesignSystem,
   PageSetup,
   BookSection,
+  BookTerm,
   PageKind,
 } from '../types/ast';
 import { VIEWPORT_PRESETS } from '../types/ast';
@@ -24,7 +25,7 @@ import {
 import { syncProjectToLocalFs, deleteProjectFromLocalFs } from '../db/localFs';
 import { rehydrateProjectAssets } from '../db/assets';
 import { viewportForPageWidth } from '../utils/pageLayout';
-import { BOOK_PAGE_KITS, FRONT_MATTER_ORDER, createBookPage } from '../db/bookPages';
+import { BOOK_PAGE_KITS, FRONT_MATTER_ORDER, BACK_MATTER_ORDER, createBookPage } from '../db/bookPages';
 
 /** In fixed-layout books the responsive blocks follow the PAGE width, not the preview device. */
 function fixedViewportFor(project: BookProject): ViewportMode | null {
@@ -170,6 +171,9 @@ interface EditorState {
   addSection: (section?: Partial<BookSection>) => string;
   updateSection: (id: string, patch: Partial<BookSection>) => void;
   deleteSection: (id: string) => void;
+  addTerm: (term?: Partial<BookTerm>) => string;
+  updateTerm: (id: string, patch: Partial<BookTerm>) => void;
+  deleteTerm: (id: string) => void;
   updateChapterCraftState: (chapterId: string, craftJson: string) => void;
   updateProjectMetadata: (metadata: Partial<BookMetadata>) => void;
   setDesignSystem: (designSystem: CanvasDesignSystem) => void;
@@ -740,6 +744,13 @@ export const useEditorStore = create<EditorState>()(
         let index: number;
         if (kind === 'cover') index = 0;
         else if (kind === 'backCover') index = list.length;
+        else if (BACK_MATTER_ORDER.includes(kind)) {
+          const rank = BACK_MATTER_ORDER.indexOf(kind);
+          const backIdx = list.findIndex((c) => c.kind === 'backCover');
+          const end = backIdx >= 0 ? backIdx : list.length;
+          const next = list.findIndex((c) => c.kind && BACK_MATTER_ORDER.indexOf(c.kind) > rank);
+          index = next >= 0 ? next : end;
+        }
         else {
           const rank = FRONT_MATTER_ORDER.indexOf(kind);
           let last = -1;
@@ -786,6 +797,36 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         const sec = state.project.sections?.find((x) => x.id === id);
         if (sec) Object.assign(sec, patch);
+        state.project.updatedAt = Date.now();
+      });
+      get().saveProjectToDb();
+    },
+
+    addTerm: (term) => {
+      const id = 'term-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
+      get().pushHistorySnapshot();
+      set((state) => {
+        const list = state.project.terms || (state.project.terms = []);
+        list.push({ id, term: '', ...term });
+        state.project.updatedAt = Date.now();
+      });
+      get().saveProjectToDb();
+      return id;
+    },
+
+    updateTerm: (id, patch) => {
+      set((state) => {
+        const t = state.project.terms?.find((x) => x.id === id);
+        if (t) Object.assign(t, patch);
+        state.project.updatedAt = Date.now();
+      });
+      get().saveProjectToDb();
+    },
+
+    deleteTerm: (id) => {
+      get().pushHistorySnapshot();
+      set((state) => {
+        state.project.terms = (state.project.terms || []).filter((x) => x.id !== id);
         state.project.updatedAt = Date.now();
       });
       get().saveProjectToDb();

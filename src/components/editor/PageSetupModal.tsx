@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Plus, Trash2, RotateCw, FileText, PanelTop, Layers } from 'lucide-react';
+import { X, Plus, Trash2, RotateCw, FileText, PanelTop, Layers, BookA } from 'lucide-react';
 import { useEditorStore } from '../../store/editorStore';
 import type { HeaderFooterZone, PageNumberStyle, PageSetup, ZoneSlot } from '../../types/ast';
 import {
@@ -20,7 +20,7 @@ interface PageSetupModalProps {
   onClose: () => void;
 }
 
-type Tab = 'page' | 'headerFooter' | 'sections';
+type Tab = 'page' | 'headerFooter' | 'sections' | 'terms';
 
 const labelCls = 'font-heading font-semibold block mb-1 text-neo-ink uppercase tracking-wider text-[11px]';
 const inputCls = 'w-full bg-white border-neo border-neo-ink px-2 py-1.5 rounded font-mono text-xs focus:outline-none';
@@ -222,6 +222,9 @@ export const PageSetupModal: React.FC<PageSetupModalProps> = ({ isOpen, onClose 
   const addSection = useEditorStore((s) => s.addSection);
   const updateSection = useEditorStore((s) => s.updateSection);
   const deleteSection = useEditorStore((s) => s.deleteSection);
+  const addTerm = useEditorStore((s) => s.addTerm);
+  const updateTerm = useEditorStore((s) => s.updateTerm);
+  const deleteTerm = useEditorStore((s) => s.deleteTerm);
   const updateChapterMeta = useEditorStore((s) => s.updateChapterMeta);
 
   const [tab, setTab] = useState<Tab>('page');
@@ -301,6 +304,7 @@ export const PageSetupModal: React.FC<PageSetupModalProps> = ({ isOpen, onClose 
           {tabBtn('page', 'Page', <FileText className="w-3.5 h-3.5" />)}
           {tabBtn('headerFooter', 'Header & footer', <PanelTop className="w-3.5 h-3.5" />)}
           {tabBtn('sections', 'Sections', <Layers className="w-3.5 h-3.5" />)}
+          {tabBtn('terms', 'Index & glossary', <BookA className="w-3.5 h-3.5" />)}
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-4">
@@ -412,6 +416,44 @@ export const PageSetupModal: React.FC<PageSetupModalProps> = ({ isOpen, onClose 
                   Page {activeIndex + 1} prints as “{formatPageNumber(activeIndex, draft.numbering) || '—'}”. Use{' '}
                   <code>{'{pageNumber}'}</code> in the header or footer to show it.
                 </p>
+              </div>
+              <div className="border-neo border-neo-ink rounded-xl p-3 bg-white flex flex-col gap-2">
+                <span className={labelCls}>Master pages</span>
+                <label className="flex items-start gap-2 cursor-pointer text-xs text-neo-ink">
+                  <input
+                    type="checkbox"
+                    checked={!!draft.facing}
+                    onChange={(e) => set({ facing: e.target.checked })}
+                    className="w-4 h-4 mt-0.5 accent-neo-ink"
+                  />
+                  <span>
+                    Facing pages (left / right)
+                    <span className="block text-[10px] font-mono text-gray-500 leading-snug">
+                      The first page is a right-hand page. The left margin becomes the inner (binding) margin, and on left-hand pages the
+                      margins and the header / footer slots are mirrored, so page numbers sit on the outside. Print PDF can lay pages out as spreads.
+                    </span>
+                  </span>
+                </label>
+                <div className="flex flex-col gap-1.5">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-neo-ink">
+                    <input
+                      type="checkbox"
+                      checked={!!draft.sectionStart?.hideHeader}
+                      onChange={(e) => set({ sectionStart: { ...draft.sectionStart, hideHeader: e.target.checked } })}
+                      className="w-4 h-4 accent-neo-ink"
+                    />
+                    Hide the header on the first page of each section
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-neo-ink">
+                    <input
+                      type="checkbox"
+                      checked={!!draft.sectionStart?.hideFooter}
+                      onChange={(e) => set({ sectionStart: { ...draft.sectionStart, hideFooter: e.target.checked } })}
+                      className="w-4 h-4 accent-neo-ink"
+                    />
+                    Hide the footer on the first page of each section
+                  </label>
+                </div>
               </div>
             </>
           )}
@@ -574,11 +616,71 @@ export const PageSetupModal: React.FC<PageSetupModalProps> = ({ isOpen, onClose 
               </div>
             </>
           )}
+          {tab === 'terms' && (
+            <>
+              <p className="text-[11px] font-mono text-gray-600 leading-snug">
+                Terms feed the <strong>Index</strong> and <strong>Glossary</strong> pages (add them from Book pages or the block palette). A term appears in
+                the index with every page whose text contains it, and with its definition in the glossary. Changes save immediately.
+              </p>
+              {(project.terms || []).length === 0 && (
+                <div className="border border-dashed border-neo-ink/50 rounded-xl p-4 text-center text-[11px] font-mono text-gray-500">
+                  No terms yet.
+                </div>
+              )}
+              {(project.terms || []).map((t) => (
+                <div key={t.id} className="border-neo border-neo-ink rounded-xl p-3 bg-white flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={t.term}
+                      onChange={(e) => updateTerm(t.id, { term: e.target.value })}
+                      placeholder="Term"
+                      aria-label="Term"
+                      className={`${inputCls} flex-1 font-bold`}
+                    />
+                    <label className="flex items-center gap-1 text-[10px] font-mono text-gray-600 whitespace-nowrap cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={t.inIndex !== false}
+                        onChange={(e) => updateTerm(t.id, { inIndex: e.target.checked })}
+                        className="w-3.5 h-3.5 accent-neo-ink"
+                      />
+                      In index
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => deleteTerm(t.id)}
+                      className="p-1.5 border-neo border-neo-ink rounded hover:bg-neo-vermilion hover:text-white"
+                      title="Delete term"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <textarea
+                    value={t.definition || ''}
+                    onChange={(e) => updateTerm(t.id, { definition: e.target.value })}
+                    placeholder="Definition (optional, shown in the glossary)"
+                    aria-label="Definition"
+                    rows={2}
+                    className={`${inputCls} resize-y`}
+                  />
+                </div>
+              ))}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => addTerm({ term: 'New term' })}
+                  className={`${btnCls} bg-neo-yellow shadow-neo-sm flex items-center gap-1.5`}
+                >
+                  <Plus className="w-3.5 h-3.5" strokeWidth={3} /> Add term
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="px-4 py-3 bg-white border-t-neo border-neo-ink flex items-center justify-between gap-2">
           <span className="text-[10px] font-mono text-gray-500">
-            {tab === 'sections' ? 'Section edits save immediately.' : dirty ? 'Unsaved page changes' : 'No changes'}
+            {tab === 'sections' || tab === 'terms' ? 'Edits here save immediately.' : dirty ? 'Unsaved page changes' : 'No changes'}
           </span>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className={`${btnCls} bg-white hover:bg-neo-bg`}>

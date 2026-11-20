@@ -371,6 +371,49 @@ export function getPageRegions(setup: PageSetup, page: Chapter): PageRegions {
   return { page: pageBox, header, footer, body };
 }
 
+// ---------------------------------------------------------------- master pages
+/** True for left-hand pages of a facing-pages book (the first page is a right-hand page). */
+export function isLeftPage(setup: PageSetup | undefined, pageIndex: number): boolean {
+  return !!setup?.facing && pageIndex % 2 === 1;
+}
+
+function mirrorZone(zone: HeaderFooterZone): HeaderFooterZone {
+  const { left, right, ...rest } = zone;
+  return { ...rest, ...(right ? { left: right } : {}), ...(left ? { right: left } : {}) };
+}
+
+/** Index of the first page of `page`'s section, or -1 when it has none. */
+export function isSectionStart(project: BookProject, pageIndex: number): boolean {
+  const page = project.chapters[pageIndex];
+  if (!page?.sectionId) return false;
+  return project.chapters.findIndex((c) => c.sectionId === page.sectionId) === pageIndex;
+}
+
+/**
+ * The page setup that applies to one page after master-page rules: mirrored margins and zones on
+ * left-hand pages, and the section-opener variant. Everything that lays out or draws a page uses this.
+ */
+export function getEffectiveSetup(project: BookProject, pageIndex: number): PageSetup {
+  const setup = project.pageSetup!;
+  let out = setup;
+  if (isLeftPage(setup, pageIndex)) {
+    out = {
+      ...out,
+      margins: { ...out.margins, left: out.margins.right, right: out.margins.left },
+      header: mirrorZone(out.header),
+      footer: mirrorZone(out.footer),
+    };
+  }
+  if (setup.sectionStart && isSectionStart(project, pageIndex)) {
+    out = {
+      ...out,
+      header: setup.sectionStart.hideHeader ? { ...out.header, enabled: false } : out.header,
+      footer: setup.sectionStart.hideFooter ? { ...out.footer, enabled: false } : out.footer,
+    };
+  }
+  return out;
+}
+
 /** The viewport class (used by responsive blocks) that best matches a page's width. */
 export function viewportForPageWidth(width: number): 'mobile' | 'tablet' | 'desktop' {
   if (width < 600) return 'mobile';

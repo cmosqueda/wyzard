@@ -170,7 +170,7 @@ export type CanvasDesignSystem = 'plain' | 'wyzard';
 
 export type LayoutMode = 'reflowable' | 'fixed';
 
-export type PageKind = 'cover' | 'title' | 'copyright' | 'dedication' | 'preface' | 'toc' | 'backCover' | 'content';
+export type PageKind = 'cover' | 'title' | 'copyright' | 'dedication' | 'preface' | 'toc' | 'glossary' | 'index' | 'backCover' | 'content';
 
 export interface ZoneSlot {
   /** Text with tokens such as {sectionTitle} or {pageNumber}. Extra lines render smaller. */
@@ -215,6 +215,23 @@ export interface PageSetup {
   accentColor?: string;
   header: HeaderFooterZone;
   footer: HeaderFooterZone;
+  /**
+   * Master pages: facing pages (left / right). Even pages (1st, 3rd, …) are right-hand pages, odd pages are
+   * left-hand pages. The left margin is the inner (binding) margin and the header / footer are mirrored.
+   */
+  facing?: boolean;
+  /** Variant for the first page of each section (chapter openers) */
+  sectionStart?: { hideHeader?: boolean; hideFooter?: boolean };
+}
+
+/** A term for the book's index and / or glossary. */
+export interface BookTerm {
+  id: string;
+  term: string;
+  /** Glossary definition. Terms without one only appear in the index. */
+  definition?: string;
+  /** Set false to keep the term out of the index (glossary only) */
+  inIndex?: boolean;
 }
 
 export interface BookSection {
@@ -243,6 +260,7 @@ export interface BookProject {
   layoutMode?: LayoutMode;
   pageSetup?: PageSetup;
   sections?: BookSection[];
+  terms?: BookTerm[];
   createdAt: number;
   updatedAt: number;
 }

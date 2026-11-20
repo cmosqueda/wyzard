@@ -33,6 +33,7 @@ import { TableBlock } from '../blocks/TableBlock';
 import { TitlePageBlock } from '../blocks/TitlePageBlock';
 import { CopyrightBlock } from '../blocks/CopyrightBlock';
 import { TocBlock } from '../blocks/TocBlock';
+import { TermsBlock } from '../blocks/TermsBlock';
 
 export const EditorWorkspace: React.FC = () => {
   const {
@@ -173,6 +174,7 @@ export const EditorWorkspace: React.FC = () => {
           TitlePageBlock,
           CopyrightBlock,
           TocBlock,
+          TermsBlock,
         }}
         indicator={{
           success: '#FF5E3A', // Neo-vermilion drop line indicator!

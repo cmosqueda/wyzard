@@ -5,7 +5,8 @@ import { parseCraftState, type ParsedBlockNode } from './astParser';
 import { getArtboardHeightRatio } from '../utils/artboard';
 import { extractMath, renderMathInText, unescapeHtml } from '../utils/math';
 import { getExportContext, withExportContext } from './exportContext';
-import { titlePageHtml, copyrightHtml, tocHtml, BOOK_FEATURES_EPUB_CSS } from './bookFeaturesHtml';
+import { renderFixedPageHtml, FIXED_PAGE_CSS } from './fixedPage';
+import { titlePageHtml, copyrightHtml, tocHtml, termsHtml, BOOK_FEATURES_EPUB_CSS } from './bookFeaturesHtml';
 import { buildTocEntries, getPrintedNumber } from '../utils/pageLayout';
 import { paginateProjectForViewport, renderPageGrabToCanvasDataUrl } from './multiFormatExporter';
 
@@ -276,6 +277,11 @@ function renderEpubNode(node: ParsedBlockNode): string {
       return ctx.project ? tocHtml(ctx.project, p, ctx.hrefFor) : '';
     }
 
+    case 'TermsBlock': {
+      const ctx = getExportContext();
+      return ctx.project ? termsHtml(ctx.project, p, ctx.hrefFor) : '';
+    }
+
     case 'TableBlock':
     case 'Table': {
       const grid: string[][] = (Array.isArray(p.rows) && p.rows.length ? p.rows : [['']]).map((r: any) =>
@@ -416,6 +422,8 @@ const KIND_EPUB_TYPE: Record<string, { type: string; role?: string }> = {
   dedication: { type: 'dedication', role: 'doc-dedication' },
   preface: { type: 'preface', role: 'doc-preface' },
   toc: { type: 'frontmatter' },
+  glossary: { type: 'glossary', role: 'doc-glossary' },
+  index: { type: 'index', role: 'doc-index' },
   backCover: { type: 'backmatter' },
 };
 
@@ -423,10 +431,12 @@ function buildChapterXhtml(
   chapter: Chapter,
   project: BookProject,
   pageIndex: number,
-  coverFile?: string
+  coverFile?: string,
+  fixedLayout = false
 ): string {
   const isFixed = project.layoutMode === 'fixed';
   const parsedNodes = chapter.craftStateJson ? parseCraftState(chapter.craftStateJson) : [];
+  if (isFixed && fixedLayout && project.pageSetup) return buildFixedLayoutXhtml(chapter, project, pageIndex, parsedNodes, coverFile);
   const bodyContent =
     isFixed && chapter.kind === 'cover' && coverFile
       ? `<div class="epub-cover"><img src="../images/${coverFile}" alt="Cover"/></div>`
@@ -454,6 +464,49 @@ function buildChapterXhtml(
     ${isFixed ? '' : `<h1 class="chapter-heading">${escapeXml(chapter.title)}</h1>`}
     ${bodyContent}
   </section>
+</body>
+</html>`;
+}
+
+/**
+ * One page as a pre-paginated (fixed-layout) EPUB document: a page-sized viewport with the page's header,
+ * footer and body absolutely positioned exactly as authored.
+ */
+function buildFixedLayoutXhtml(
+  chapter: Chapter,
+  project: BookProject,
+  pageIndex: number,
+  nodes: ParsedBlockNode[],
+  coverFile?: string
+): string {
+  const setup = project.pageSetup!;
+  const W = Math.round(setup.width);
+  const H = Math.round(setup.height);
+  const kind = chapter.kind ? KIND_EPUB_TYPE[chapter.kind] : undefined;
+  const typeAttr = kind ? `epub:type="${kind.type}"${kind.role ? ` role="${kind.role}"` : ''}` : 'epub:type="bodymatter chapter" role="doc-chapter"';
+  const page =
+    chapter.kind === 'cover' && coverFile
+      ? `<section id="page-${pageIndex + 1}" style="position:relative;width:${W}px;height:${H}px;overflow:hidden"><img src="../images/${coverFile}" alt="Cover" style="display:block;width:${W}px;height:${H}px"/></section>`
+      : withExportContext({ project, hrefFor: (i) => `chapter-${i + 1}.xhtml` }, () => renderFixedPageHtml(project, pageIndex, nodes, renderEpubNode));
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${project.metadata.language || 'en'}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=${W}, height=${H}" />
+  <title>${escapeXml(chapter.title)}</title>
+  <link rel="stylesheet" type="text/css" href="../css/style.css" />
+  <style type="text/css">
+html, body { margin: 0; padding: 0; width: ${W}px; height: ${H}px; overflow: hidden; background: ${chapter.backgroundColor || '#FFFFFF'}; }
+body { font-family: 'Plus Jakarta Sans', Arial, sans-serif; color: #111; }
+${FIXED_PAGE_CSS}
+.wz-toc-leader { display: block; }
+.wz-toc-gap { display: block; }
+.wz-toc-list li { overflow: visible; }
+  </style>
+</head>
+<body ${typeAttr}>
+  ${page}
 </body>
 </html>`;
 }
@@ -704,7 +757,13 @@ body { color: #111; }
 /**
  * Packages the entire book project into a valid EPUB 3.3 binary package.
  */
-export async function exportToEpub(project: BookProject): Promise<void> {
+export interface EpubExportOptions {
+  /** Fixed-layout books only: pre-paginated EPUB where every page looks exactly as authored */
+  fixedLayout?: boolean;
+}
+
+export async function exportToEpub(project: BookProject, options: EpubExportOptions = {}): Promise<void> {
+  const fixedLayout = project.layoutMode === 'fixed' && !!project.pageSetup && !!options.fixedLayout;
   const zip = new JSZip();
 
   // 1. mimetype: MUST be the first file in the ZIP, completely uncompressed (STORE)
@@ -731,7 +790,7 @@ export async function exportToEpub(project: BookProject): Promise<void> {
   const chapterEntries: { id: string; filename: string; title: string; hasMath?: boolean }[] = [];
   project.chapters.forEach((chapter, idx) => {
     const filename = `chapter-${idx + 1}.xhtml`;
-    const chapterXml = buildChapterXhtml(chapter, project, idx, cover?.file);
+    const chapterXml = buildChapterXhtml(chapter, project, idx, cover?.file, fixedLayout);
     zip.file(`OEBPS/chapters/${filename}`, chapterXml);
     chapterEntries.push({
       id: `chapter-${idx + 1}`,
@@ -752,7 +811,9 @@ export async function exportToEpub(project: BookProject): Promise<void> {
 <head>
   <meta charset="utf-8" />
   <title>Cover</title>
+  ${fixedLayout ? `<meta name="viewport" content="width=${Math.round(project.pageSetup!.width)}, height=${Math.round(project.pageSetup!.height)}" />` : ''}
   <link rel="stylesheet" type="text/css" href="../css/style.css" />
+  ${fixedLayout ? `<style type="text/css">html, body { margin: 0; padding: 0; width: ${Math.round(project.pageSetup!.width)}px; height: ${Math.round(project.pageSetup!.height)}px; overflow: hidden; } img { display: block; width: ${Math.round(project.pageSetup!.width)}px; height: ${Math.round(project.pageSetup!.height)}px; }</style>` : ''}
 </head>
 <body class="epub-body-doc">
   <section epub:type="cover"><div class="epub-cover"><img src="../images/${cover.file}" alt="Cover"/></div></section>
@@ -853,13 +914,16 @@ export async function exportToEpub(project: BookProject): Promise<void> {
   const bookId = project.metadata.identifier || `urn:uuid:${project.id}`;
 
   const contentOpf = `<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id" xml:lang="${project.metadata.language || 'en'}">
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id" xml:lang="${project.metadata.language || 'en'}"${fixedLayout ? ' prefix="rendition: http://www.idpf.org/vocab/rendition/#"' : ''}>
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="pub-id">${escapeXml(bookId)}</dc:identifier>
     <dc:title>${escapeXml(project.metadata.title)}</dc:title>
     <dc:language>${escapeXml(project.metadata.language || 'en')}</dc:language>
     <dc:creator id="creator">${escapeXml(project.metadata.author || 'Author')}</dc:creator>
     <meta property="dcterms:modified">${nowIso}</meta>
+    ${fixedLayout ? `<meta property="rendition:layout">pre-paginated</meta>
+    <meta property="rendition:orientation">auto</meta>
+    <meta property="rendition:spread">${project.pageSetup!.facing ? 'both' : 'none'}</meta>` : ''}
     ${cover ? '<meta name="cover" content="cover-image"/>' : ''}
     ${project.metadata.publisher ? `<dc:publisher>${escapeXml(project.metadata.publisher)}</dc:publisher>` : ''}
     ${project.metadata.description ? `<dc:description>${escapeXml(project.metadata.description)}</dc:description>` : ''}
@@ -884,13 +948,19 @@ export async function exportToEpub(project: BookProject): Promise<void> {
       .join('')}
   </manifest>
   <spine>
-    ${needsCoverDoc ? '<itemref idref="cover-doc"/>' : ''}
+    ${needsCoverDoc ? `<itemref idref="cover-doc"${fixedLayout && project.pageSetup!.facing ? ' properties="page-spread-right"' : ''}/>` : ''}
     ${chapterEntries
-      .map(
-        (c) => `
-    <itemref idref="${c.id}"/>
-    `
-      )
+      .map((c, i) => {
+        const isPage = i < project.chapters.length;
+        const props: string[] = [];
+        if (fixedLayout) {
+          if (!isPage) props.push('rendition:layout-reflowable');
+          else if (project.pageSetup!.facing) props.push(i % 2 === 0 ? 'page-spread-right' : 'page-spread-left');
+        }
+        return `
+    <itemref idref="${c.id}"${props.length ? ` properties="${props.join(' ')}"` : ''}/>
+    `;
+      })
       .join('')}
   </spine>
 </package>`;

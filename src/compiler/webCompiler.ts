@@ -4,7 +4,7 @@ import { googleFontsHref, googleFontStack } from '../utils/googleFonts';
 import { getArtboardHeightRatio, getArtboardWidthPct } from '../utils/artboard';
 import { renderFixedPageHtml, FIXED_PAGE_CSS } from './fixedPage';
 import { getExportContext, withExportContext } from './exportContext';
-import { titlePageHtml, copyrightHtml, tocHtml } from './bookFeaturesHtml';
+import { titlePageHtml, copyrightHtml, tocHtml, termsHtml } from './bookFeaturesHtml';
 import { KATEX_CSS_HREF, hasMath, htmlHasMath, renderMathInHtml, renderMathInText } from '../utils/math';
 
 const MATH_CSS_LINK = `<link rel="stylesheet" href="${KATEX_CSS_HREF}">`;
@@ -278,6 +278,11 @@ export function renderWebNode(node: ParsedBlockNode): string {
     case 'TocBlock': {
       const ctx = getExportContext();
       return ctx.project ? tocHtml(ctx.project, p, ctx.hrefFor) : '';
+    }
+
+    case 'TermsBlock': {
+      const ctx = getExportContext();
+      return ctx.project ? termsHtml(ctx.project, p, ctx.hrefFor) : '';
     }
 
     case 'TableBlock':

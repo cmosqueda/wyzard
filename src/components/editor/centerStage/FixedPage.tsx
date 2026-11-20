@@ -3,6 +3,7 @@ import { AlertTriangle } from 'lucide-react';
 import type { Chapter, HeaderFooterZone, PageSetup, ZoneSlot } from '../../../types/ast';
 import {
   getPageContext,
+  getEffectiveSetup,
   getPageRegions,
   resolveColor,
   resolveTokens,
@@ -110,7 +111,8 @@ export const FixedPageStage: React.FC<FixedPageStageProps> = ({
   showGuides,
   children,
 }) => {
-  const regions = getPageRegions(setup, page);
+  const effSetup = getEffectiveSetup(project, pageIndex);
+  const regions = getPageRegions(effSetup, page);
   const ctx = getPageContext(project, pageIndex);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [overflowPx, setOverflowPx] = useState(0);
@@ -175,10 +177,10 @@ export const FixedPageStage: React.FC<FixedPageStageProps> = ({
               <div
                 className="absolute border border-dashed border-sky-500/70"
                 style={{
-                  left: setup.margins.left,
-                  top: setup.margins.top,
-                  right: setup.margins.right,
-                  bottom: setup.margins.bottom,
+                  left: effSetup.margins.left,
+                  top: effSetup.margins.top,
+                  right: effSetup.margins.right,
+                  bottom: effSetup.margins.bottom,
                 }}
               />
             )}

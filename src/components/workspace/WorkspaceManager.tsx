@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, createStarterProject, createBlankProject, createFixedBookProject } from '../../db';
+import { createTextbookProject } from '../../db/textbook';
 import { PAGE_SIZE_PRESETS, clampPageDimension, type PageSizeKey } from '../../utils/pageLayout';
 import { WyzardLogo } from '../ui/WyzardLogo';
 import { CreditsModal } from './CreditsModal';
@@ -52,7 +53,7 @@ export const WorkspaceManager: React.FC = () => {
   const [isCreditsOpen, setIsCreditsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
-  const [newType, setNewType] = useState<'reflowable' | 'fixed'>('reflowable');
+  const [newType, setNewType] = useState<'reflowable' | 'fixed' | 'textbook'>('reflowable');
   const [newSizeKey, setNewSizeKey] = useState<PageSizeKey>('mobile');
   const [newCustomW, setNewCustomW] = useState(600);
   const [newCustomH, setNewCustomH] = useState(800);
@@ -109,8 +110,19 @@ export const WorkspaceManager: React.FC = () => {
     }
     setFormError(null);
     const preset = PAGE_SIZE_PRESETS.find((p) => p.key === newSizeKey) || PAGE_SIZE_PRESETS[0];
+    const sizeArg =
+      newSizeKey === 'custom'
+        ? { key: 'custom' as const, width: clampPageDimension(newCustomW), height: clampPageDimension(newCustomH) }
+        : { key: newSizeKey, width: preset.width, height: preset.height };
     const blank =
-      newType === 'fixed'
+      newType === 'textbook'
+        ? createTextbookProject(
+            trimmedTitle,
+            newAuthor.trim() || 'Wyzard Author',
+            newDescription.trim() || 'A fixed-layout textbook created in Wyzard.',
+            sizeArg
+          )
+        : newType === 'fixed'
         ? createFixedBookProject(
             trimmedTitle,
             newAuthor.trim() || 'Wyzard Author',
@@ -532,11 +544,12 @@ export const WorkspaceManager: React.FC = () => {
               )}
               <div>
                 <label className="block text-xs font-mono font-bold uppercase text-neo-ink mb-1">Project type</label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {(
                     [
                       { id: 'reflowable', title: 'Reflowable', desc: 'Flows to any screen. Digital-first, like today.' },
                       { id: 'fixed', title: 'Fixed-layout book', desc: 'Exact page size with margins, headers, footers and page numbers.' },
+                      { id: 'textbook', title: 'Textbook starter', desc: 'Fixed-layout book with cover, contents, unit and chapter openers, glossary and index ready to edit.' },
                     ] as const
                   ).map((t) => (
                     <button
@@ -553,7 +566,7 @@ export const WorkspaceManager: React.FC = () => {
                   ))}
                 </div>
               </div>
-              {newType === 'fixed' && (
+              {newType !== 'reflowable' && (
                 <div>
                   <label className="block text-xs font-mono font-bold uppercase text-neo-ink mb-1">Page size</label>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
